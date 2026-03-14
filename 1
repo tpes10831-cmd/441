@@ -63,7 +63,7 @@ local translateAccelEnabled = false
 local _G = _G or getfenv(0)._G
 _G.FastAttack = _G.FastAttack ~= nil and _G.FastAttack or true
 
--- 確保 FOV 配置正確初始化
+-- 確保 FOV 配置正確初始化（新增）
 getgenv().CaiHuaConfig = getgenv().CaiHuaConfig or {
     Toggles = {
         FOV_Active = false
@@ -83,8 +83,8 @@ local Window = WindUI:CreateWindow({
     Transparent = false,
     Theme = "Light",
     ScrollBarEnabled = true,
-    Background = "rbxassetid://140187958380334",
-    BackgroundImageTransparency = 0.4,
+    Background = "rbxassetid://140187958380334",  -- 你的圖片 ID
+    BackgroundImageTransparency = 0.4,            -- 透明度（0=完全不透明，1=完全透明，建議 0.3~0.5 讓文字清楚）
 })
 
 -- N 快捷鍵開關 UI
@@ -110,7 +110,7 @@ Tabs.ThemeTab = configSection:Tab({ Title = "主題顏色", Icon = "palette" })
 -- ===================== 公告標籤頁 =====================
 Tabs.NoticeTab:Paragraph({
     Title = "小傑腳本中心",
-    Desc = "小傑製作\n持續更新\n腳本有問題請跟我說\n聚怪可能只有視覺效果\n禁止亂打",
+    Desc = "小傑製作\n持續更新\n腳本有問題請跟我說\n聚怪可能無效\n禁止亂打\n禁止亂打",
     Image = "info",
 })
 
@@ -118,14 +118,12 @@ Tabs.NoticeTab:Divider()
 
 Tabs.NoticeTab:Paragraph({
     Title = "快捷鍵說明",
-    Desc = "N: 開關界面",
+    Desc = "N: 開關界面 (已從 G 改為 N)",
     Image = "keyboard",
 })
 
--- ===================== 通用標籤頁（功能1）- 完整整合 FOV =====================
+-- ===================== 通用標籤頁（功能1） =====================
 local currentZoom = 128
-
--- 原有的視角縮放功能
 Tabs.GeneralTab:Slider({
     Title = "視角縮放距離",
     Value = { Min = 128, Max = 10000, Default = 128 },
@@ -136,7 +134,7 @@ Tabs.GeneralTab:Slider({
     end
 })
 
--- ===================== FOV 獨立功能 =====================
+-- ===================== FOV 獨立功能（新增） =====================
 
 -- FOV 開關
 Tabs.GeneralTab:Toggle({
@@ -185,7 +183,6 @@ end)
 
 Tabs.GeneralTab:Divider()
 
--- 速度設定
 Tabs.GeneralTab:Input({
     Title = "速度",
     Value = "50",
@@ -229,20 +226,25 @@ Tabs.GeneralTab:Toggle({
 
 Tabs.GeneralTab:Divider()
 
--- 跳躍功能
+-- ================= 手機兼容的跳躍高度修改器（範圍10-1000）=================
 local JUMP_HEIGHT = 100
 local jumpEnabled = false
 local jumpHold = false
 local jumpConnection = nil
 local jumpInputBegan = nil
 local jumpInputEnded = nil
+
+-- 手機跳躍檢測變量
 local touchJumpActive = false
 local touchBeganConnection = nil
 local touchEndedConnection = nil
+
+-- 手機跳躍按鈕
 local mobileJumpButton = nil
 local mobileJumpGui = nil
 
 local function setupMobileJumpDetection()
+    -- 清除舊的連線
     if touchBeganConnection then
         touchBeganConnection:Disconnect()
         touchBeganConnection = nil
@@ -252,20 +254,29 @@ local function setupMobileJumpDetection()
         touchEndedConnection = nil
     end
     
+    -- 檢測觸控開始
     touchBeganConnection = UserInputService.TouchStarted:Connect(function(touch, gameProcessed)
         if gameProcessed or not jumpEnabled then return end
+        
+        -- 檢測是否在跳躍按鈕區域（螢幕右下半部，跳躍按鈕通常在那裡）
         local screenSize = Camera.ViewportSize
         local touchPos = touch.Position
+        
+        -- 跳躍按鈕通常在螢幕右下角
         if touchPos.X > screenSize.X * 0.7 and touchPos.Y > screenSize.Y * 0.6 then
             touchJumpActive = true
             jumpHold = true
         end
     end)
     
+    -- 檢測觸控結束
     touchEndedConnection = UserInputService.TouchEnded:Connect(function(touch, gameProcessed)
         if gameProcessed then return end
+        
+        -- 檢查是否還有其他活躍的觸控
         local touches = UserInputService:GetTouches()
         local stillJumping = false
+        
         for _, activeTouch in ipairs(touches) do
             local touchPos = activeTouch.Position
             local screenSize = Camera.ViewportSize
@@ -274,16 +285,19 @@ local function setupMobileJumpDetection()
                 break
             end
         end
+        
         if not stillJumping then
             touchJumpActive = false
             jumpHold = false
         end
     end)
     
+    -- 同時保留鍵盤支持
     setupKeyboardJumpDetection()
 end
 
 local function setupKeyboardJumpDetection()
+    -- 清除舊的鍵盤連線
     if jumpInputBegan then
         jumpInputBegan:Disconnect()
         jumpInputBegan = nil
@@ -293,20 +307,30 @@ local function setupKeyboardJumpDetection()
         jumpInputEnded = nil
     end
     
+    -- 鍵盤按下
     jumpInputBegan = UserInputService.InputBegan:Connect(function(input, gpe)
         if gpe or not jumpEnabled then return end
-        if input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.ButtonA then
+        if input.KeyCode == Enum.KeyCode.Space then
+            jumpHold = true
+        end
+        -- 也支持遊戲手柄的A鍵
+        if input.KeyCode == Enum.KeyCode.ButtonA then
             jumpHold = true
         end
     end)
 
+    -- 鍵盤釋放
     jumpInputEnded = UserInputService.InputEnded:Connect(function(input, gpe)
-        if input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.ButtonA then
+        if input.KeyCode == Enum.KeyCode.Space then
+            jumpHold = false
+        end
+        if input.KeyCode == Enum.KeyCode.ButtonA then
             jumpHold = false
         end
     end)
 end
 
+-- 修改跳躍循環，讓它更平滑
 local function startJumpLoop()
     if jumpConnection then
         jumpConnection:Disconnect()
@@ -320,10 +344,13 @@ local function startJumpLoop()
                 local root = char:FindFirstChild("HumanoidRootPart")
                 local humanoid = char:FindFirstChildOfClass("Humanoid")
                 if root and humanoid and humanoid.Health > 0 then
+                    -- 更平滑的跳躍
                     if root.Velocity.Y < JUMP_HEIGHT then
                         local force = JUMP_HEIGHT * 2
                         root.Velocity = Vector3.new(root.Velocity.X, math.min(root.Velocity.Y + force * dt, JUMP_HEIGHT), root.Velocity.Z)
                     end
+                    
+                    -- 確保角色處於跳躍狀態
                     if humanoid:GetState() ~= Enum.HumanoidStateType.Jumping and 
                        humanoid:GetState() ~= Enum.HumanoidStateType.Freefall then
                         humanoid.Jump = true
@@ -331,6 +358,7 @@ local function startJumpLoop()
                 end
             end
         else
+            -- 當不跳躍時，重置角色的跳躍狀態
             local char = LocalPlayer.Character
             if char then
                 local humanoid = char:FindFirstChildOfClass("Humanoid")
@@ -342,12 +370,15 @@ local function startJumpLoop()
     end)
 end
 
+-- 創建手機跳躍按鈕
 local function createMobileJumpButton()
+    -- 如果按鈕已存在，先刪除
     if mobileJumpGui then
         mobileJumpGui:Destroy()
         mobileJumpGui = nil
     end
     
+    -- 創建一個簡單的屏幕按鈕
     mobileJumpGui = Instance.new("ScreenGui")
     mobileJumpGui.Name = "MobileJumpButton"
     mobileJumpGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
@@ -368,13 +399,16 @@ local function createMobileJumpButton()
     button.BorderSizePixel = 3
     button.BorderColor3 = Color3.fromRGB(0, 150, 255)
     
+    -- 圓角效果
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 20)
     corner.Parent = button
     
+    -- 按鈕事件
     button.MouseButton1Down:Connect(function()
         if jumpEnabled then
             jumpHold = true
+            -- 按鈕視覺反饋
             button.BackgroundColor3 = Color3.fromRGB(200, 200, 255)
         end
     end)
@@ -384,6 +418,7 @@ local function createMobileJumpButton()
         button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     end)
     
+    -- 觸控事件（手機）
     button.TouchLongPress:Connect(function()
         if jumpEnabled then
             jumpHold = true
@@ -396,6 +431,7 @@ local function createMobileJumpButton()
         button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     end)
     
+    -- 按鈕上的說明文字
     local infoLabel = Instance.new("TextLabel")
     infoLabel.Parent = button
     infoLabel.Size = UDim2.new(1, 0, 0.3, 0)
@@ -409,6 +445,7 @@ local function createMobileJumpButton()
     mobileJumpButton = button
 end
 
+-- 更新跳躍按鈕顯示的高度
 local function updateJumpButtonHeight()
     if mobileJumpButton and mobileJumpButton.Parent then
         local infoLabel = mobileJumpButton:FindFirstChildOfClass("TextLabel")
@@ -418,14 +455,18 @@ local function updateJumpButtonHeight()
     end
 end
 
+-- 修改設置跳躍的函數
 local function setJumpEnabled(enabled)
     jumpEnabled = enabled
     
     if enabled then
+        -- 檢測平台類型
         local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
         
         if isMobile then
+            -- 手機/平板：使用觸控檢測
             setupMobileJumpDetection()
+            -- 顯示跳躍按鈕
             if not mobileJumpGui or not mobileJumpGui.Parent then
                 createMobileJumpButton()
             else
@@ -437,6 +478,7 @@ local function setJumpEnabled(enabled)
                 Duration = 3 
             })
         else
+            -- PC：使用鍵盤檢測
             setupKeyboardJumpDetection()
             WindUI:Notify({ 
                 Title = "跳躍修改", 
@@ -448,6 +490,7 @@ local function setJumpEnabled(enabled)
         startJumpLoop()
         updateJumpButtonHeight()
     else
+        -- 關閉功能時清理所有連線
         if jumpConnection then
             jumpConnection:Disconnect()
             jumpConnection = nil
@@ -472,10 +515,12 @@ local function setJumpEnabled(enabled)
         jumpHold = false
         touchJumpActive = false
         
+        -- 隱藏手機按鈕
         if mobileJumpGui then
             mobileJumpGui.Enabled = false
         end
         
+        -- 重置角色狀態
         local char = LocalPlayer.Character
         if char then
             local humanoid = char:FindFirstChildOfClass("Humanoid")
@@ -492,6 +537,7 @@ local function setJumpEnabled(enabled)
     end
 end
 
+-- 修改高度設置函數（範圍改為10-1000）
 local function setJumpHeight(height)
     JUMP_HEIGHT = height
     updateJumpButtonHeight()
@@ -502,8 +548,10 @@ local function setJumpHeight(height)
     })
 end
 
+-- 在角色重生時重新設置
 LocalPlayer.CharacterAdded:Connect(function()
     if jumpEnabled then
+        -- 短暫延遲確保角色完全加載
         task.wait(1)
         setJumpEnabled(false)
         task.wait(0.2)
@@ -539,24 +587,30 @@ Tabs.GeneralTab:Toggle({
 
 Tabs.GeneralTab:Divider()
 
--- 水上行走功能
+-- ===================== 水上行走功能 =====================
 local WaterWalkEnabled = false
 local WaterBase = nil
 
+-- 獲取水面物件
 local function GetWaterBase()
     if WaterBase and WaterBase.Parent then
         return WaterBase
     end
+    
+    -- 嘗試找到水面物件
     local Map = workspace:FindFirstChild("Map")
     if Map then
         WaterBase = Map:FindFirstChild("WaterBase-Plane")
     end
+    
     return WaterBase
 end
 
+-- 設置水上行走
 local function SetWaterWalk(enabled)
     local waterBase = GetWaterBase()
     if not waterBase then
+        -- 如果找不到水面，嘗試其他可能的路徑
         waterBase = workspace:FindFirstChild("WaterBase-Plane")
         if not waterBase then
             waterBase = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("WaterBase")
@@ -565,6 +619,7 @@ local function SetWaterWalk(enabled)
     
     if waterBase and waterBase:IsA("BasePart") then
         if enabled then
+            -- 提高水面高度，讓角色可以站在水面上
             waterBase.Size = Vector3.new(1000, 112, 1000)
             waterBase.CanCollide = true
             WaterWalkEnabled = true
@@ -574,6 +629,7 @@ local function SetWaterWalk(enabled)
                 Duration = 3 
             })
         else
+            -- 恢復原本的水面高度
             waterBase.Size = Vector3.new(1000, 80, 1000)
             WaterWalkEnabled = false
             WindUI:Notify({ 
@@ -592,6 +648,7 @@ local function SetWaterWalk(enabled)
     end
 end
 
+-- 定期檢查並維持水上行走狀態（防止遊戲重置）
 local waterWalkLoop = nil
 local function StartWaterWalkLoop()
     if waterWalkLoop then
@@ -606,6 +663,7 @@ local function StartWaterWalkLoop()
                 if WaterWalkEnabled then
                     local waterBase = GetWaterBase()
                     if waterBase and waterBase:IsA("BasePart") then
+                        -- 確保水面高度維持在112
                         if waterBase.Size.Y ~= 112 then
                             waterBase.Size = Vector3.new(1000, 112, 1000)
                         end
@@ -617,6 +675,7 @@ local function StartWaterWalkLoop()
     end)
 end
 
+-- 監聽角色重生
 LocalPlayer.CharacterAdded:Connect(function()
     if WaterWalkEnabled then
         task.wait(1)
@@ -624,6 +683,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     end
 end)
 
+-- 監聽地圖變化（如果有的話）
 workspace.DescendantAdded:Connect(function(descendant)
     if WaterWalkEnabled and descendant.Name == "WaterBase-Plane" or descendant.Name == "WaterBase" then
         if descendant:IsA("BasePart") then
@@ -707,6 +767,7 @@ Tabs.GeneralTab:Button({
     end
 })
 
+-- 修改：將「移除岩漿」改為「移除岩漿and鬼船傷害」
 Tabs.GeneralTab:Button({
     Title = "移除岩漿and鬼船傷害",
     Icon = "flame",
@@ -730,6 +791,7 @@ Tabs.GeneralTab:Button({
 })
 
 -- ===================== 範圍攻擊系統 =====================
+
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Net = Modules:WaitForChild("Net")
@@ -916,7 +978,29 @@ LocalPlayer.CharacterRemoving:Connect(function()
     end
 end)
 
+local function ReconnectRemotes()
+    Modules = ReplicatedStorage:WaitForChild("Modules")
+    Net = Modules:WaitForChild("Net")
+    RegisterAttack = Net:WaitForChild("RE/RegisterAttack")
+    RegisterHit = Net:WaitForChild("RE/RegisterHit")
+end
+
+local function OnCharacterRespawn()
+    ReconnectRemotes()
+    
+    if AttackConfig.Enabled then
+        task.wait(1)
+        startAttackLoop()
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(character)
+    task.wait(2)
+    OnCharacterRespawn()
+end)
+
 -- ===================== 範圍攻擊標籤頁 UI =====================
+
 Tabs.AttackTab:Toggle({
     Title = "快速攻擊開關",
     Value = true,
@@ -924,13 +1008,21 @@ Tabs.AttackTab:Toggle({
         AttackConfig.Enabled = state
         if state then
             startAttackLoop()
-            WindUI:Notify({ Title = "快速攻擊", Content = "已開啟", Duration = 2 })
+            WindUI:Notify({ 
+                Title = "快速攻擊", 
+                Content = "已開啟", 
+                Duration = 2 
+            })
         else
             if attackConnection then
                 attackConnection:Disconnect()
                 attackConnection = nil
             end
-            WindUI:Notify({ Title = "快速攻擊", Content = "已關閉", Duration = 2 })
+            WindUI:Notify({ 
+                Title = "快速攻擊", 
+                Content = "已關閉", 
+                Duration = 2 
+            })
         end
     end
 })
@@ -942,7 +1034,11 @@ Tabs.AttackTab:Slider({
     Value = { Min = 50, Max = 10000, Default = 5000 },
     Callback = function(value)
         AttackConfig.AttackDistance = value
-        WindUI:Notify({ Title = "攻擊範圍", Content = "已設置為: " .. value, Duration = 2 })
+        WindUI:Notify({ 
+            Title = "攻擊範圍", 
+            Content = "已設置為: " .. value, 
+            Duration = 2 
+        })
     end
 })
 
@@ -959,11 +1055,16 @@ Tabs.AttackTab:Input({
                 Content = string.format("已設置為: %.3f秒 (約%d次/秒)", speed, math.floor(1/speed)), 
                 Duration = 3 
             })
+            
             if AttackConfig.Enabled then
                 startAttackLoop()
             end
         else
-            WindUI:Notify({ Title = "錯誤", Content = "請輸入 0.03 到 2 之間的數字", Duration = 3 })
+            WindUI:Notify({ 
+                Title = "錯誤", 
+                Content = "請輸入 0.03 到 2 之間的數字", 
+                Duration = 3 
+            })
         end
     end
 })
@@ -975,7 +1076,11 @@ Tabs.AttackTab:Toggle({
     Value = true,
     Callback = function(state)
         AttackConfig.AttackMobs = state
-        WindUI:Notify({ Title = "攻擊NPC", Content = state and "已開啟" or "已關閉", Duration = 2 })
+        WindUI:Notify({ 
+            Title = "攻擊NPC", 
+            Content = state and "已開啟" or "已關閉", 
+            Duration = 2 
+        })
     end
 })
 
@@ -984,7 +1089,11 @@ Tabs.AttackTab:Toggle({
     Value = true,
     Callback = function(state)
         AttackConfig.AttackPlayers = state
-        WindUI:Notify({ Title = "攻擊玩家", Content = state and "已開啟" or "已關閉", Duration = 2 })
+        WindUI:Notify({ 
+            Title = "攻擊玩家", 
+            Content = state and "已開啟" or "已關閉", 
+            Duration = 2 
+        })
     end
 })
 
@@ -1233,7 +1342,7 @@ local function disableESPPro()
     WindUI:Notify({ Title = "ESP Pro", Content = "已禁用ESP", Duration = 2 })
 end
 
--- 新加的ESP系統
+-- ===================== 新加的ESP系統 =====================
 local ESPConfig = {
     MainSwitch = false,     
     ShowPlayerInfo = false,
@@ -1481,7 +1590,7 @@ task.spawn(function()
     end
 end)
 
--- ESP UI控制
+-- ===================== ESP UI控制 =====================
 Tabs.ESPTab:Toggle({
     Title = "ESP Pro",
     Value = false,
@@ -1502,9 +1611,17 @@ Tabs.ESPTab:Toggle({
     Callback = function(enabled)
         ESPConfig.MainSwitch = enabled
         if enabled then
-            WindUI:Notify({ Title = "進階ESP", Content = "已開啟", Duration = 2 })
+            WindUI:Notify({ 
+                Title = "進階ESP", 
+                Content = "已開啟", 
+                Duration = 2 
+            })
         else
-            WindUI:Notify({ Title = "進階ESP", Content = "已關閉", Duration = 2 })
+            WindUI:Notify({ 
+                Title = "進階ESP", 
+                Content = "已關閉", 
+                Duration = 2 
+            })
         end
         UpdateAllESP()
     end
@@ -1516,7 +1633,11 @@ Tabs.ESPTab:Toggle({
     Callback = function(enabled)
         ESPConfig.ShowPlayerInfo = enabled
         UpdateAllESP()
-        WindUI:Notify({ Title = "玩家信息", Content = enabled and "已開啟" or "已關閉", Duration = 2 })
+        WindUI:Notify({ 
+            Title = "玩家信息", 
+            Content = enabled and "已開啟" or "已關閉", 
+            Duration = 2 
+        })
     end
 })
 
@@ -1526,7 +1647,11 @@ Tabs.ESPTab:Toggle({
     Callback = function(enabled)
         ESPConfig.ShowTracer = enabled
         UpdateAllESP()
-        WindUI:Notify({ Title = "射线追踪", Content = enabled and "已開啟" or "已關閉", Duration = 2 })
+        WindUI:Notify({ 
+            Title = "射线追踪", 
+            Content = enabled and "已開啟" or "已關閉", 
+            Duration = 2 
+        })
     end
 })
 
@@ -1534,7 +1659,9 @@ for _, p in pairs(Players:GetPlayers()) do
     setupPlayerConnections(p)
 end
 
--- ===================== 傳送標籤頁 =====================
+-- ===================== 傳送標籤頁（追蹤傳送 + 直接傳送 + 單次傳送）=====================
+
+-- 追蹤傳送設定
 local TrackConfig = {
     Enabled = false,
     Target = nil,
@@ -1545,22 +1672,32 @@ local TrackConfig = {
     TrackThread = nil,
 }
 
+-- 直接傳送設定
 local InstantConfig = {
     Enabled = false,
     Target = nil,
     TeleportConnection = nil,
 }
 
-local playerList = {}
-local playerMap = {}
+-- 單次傳送設定（只傳送一次）
+local SingleConfig = {
+    Target = nil,
+}
+
+-- 玩家列表相關變數
+local playerList = {}  -- 儲存玩家名稱列表
+local playerMap = {}   -- 儲存玩家名稱對應的物件
 local selectedPlayer = nil
 local playerDropdown = nil
 local trackButton = nil
 local instantButton = nil
 local singleButton = nil
 local refreshButton = nil
+
+-- 儲存原始碰撞狀態
 local originalCollisionStates = {}
 
+-- 設定X軸偏離
 local function SetOffsetX(value)
     value = tonumber(value)
     if not value or value < -5000 or value > 5000 then
@@ -1572,6 +1709,7 @@ local function SetOffsetX(value)
     return true
 end
 
+-- 設定Y軸偏離
 local function SetOffsetY(value)
     value = tonumber(value)
     if not value or value < -5000 or value > 5000 then
@@ -1583,6 +1721,7 @@ local function SetOffsetY(value)
     return true
 end
 
+-- 設定Z軸偏離
 local function SetOffsetZ(value)
     value = tonumber(value)
     if not value or value < -5000 or value > 5000 then
@@ -1594,6 +1733,7 @@ local function SetOffsetZ(value)
     return true
 end
 
+-- 設定追蹤速度
 local function SetTrackSpeed(value)
     value = tonumber(value)
     if not value or value < 1 or value > 500 then
@@ -1605,6 +1745,9 @@ local function SetTrackSpeed(value)
     return true
 end
 
+-- ==================== 穿牆功能 ====================
+
+-- 儲存原始碰撞狀態
 local function SaveOriginalCollision()
     local character = LocalPlayer.Character
     if not character then return false end
@@ -1623,6 +1766,7 @@ local function SaveOriginalCollision()
     return true
 end
 
+-- 恢復原始碰撞狀態
 local function RestoreOriginalCollision()
     local character = LocalPlayer.Character
     if not character then 
@@ -1630,6 +1774,7 @@ local function RestoreOriginalCollision()
         return 
     end
     
+    -- 先將所有部件恢復為可碰撞
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
             pcall(function()
@@ -1638,6 +1783,7 @@ local function RestoreOriginalCollision()
         end
     end
     
+    -- 恢復特定部件的原始值
     for _, data in pairs(originalCollisionStates) do
         local part = data.part
         if part and part.Parent and part:IsA("BasePart") then
@@ -1650,6 +1796,7 @@ local function RestoreOriginalCollision()
     originalCollisionStates = {}
 end
 
+-- 開啟穿牆
 local function EnableNoClip()
     local character = LocalPlayer.Character
     if not character then return end
@@ -1665,11 +1812,16 @@ local function EnableNoClip()
     end
 end
 
+-- 關閉穿牆
 local function DisableNoClip()
     RestoreOriginalCollision()
 end
 
+-- ==================== 追蹤傳送功能（完全重寫，不受飛行干擾）====================
+
+-- 追蹤傳送循環 - 使用 CFrame 實現平滑移動，不受任何物理影響
 local function TrackPlayer(target)
+    -- 開啟穿牆
     EnableNoClip()
     
     while TrackConfig.Enabled and target and target.Parent do
@@ -1685,6 +1837,7 @@ local function TrackPlayer(target)
         local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
         if not hrp or not targetRoot then break end
         
+        -- 計算目標位置加上XYZ偏離
         local targetPos = targetRoot.Position
         local offsetPos = Vector3.new(
             targetPos.X + TrackConfig.OffsetX,
@@ -1692,42 +1845,54 @@ local function TrackPlayer(target)
             targetPos.Z + TrackConfig.OffsetZ
         )
         
+        -- 計算當前位置到目標位置的距離
         local currentPos = hrp.Position
         local distance = (offsetPos - currentPos).Magnitude
         
+        -- 如果距離很近，直接設定位置
         if distance < 1 then
             hrp.CFrame = CFrame.new(offsetPos)
         else
+            -- 計算移動方向和距離
             local direction = (offsetPos - currentPos).Unit
-            local moveDistance = TrackConfig.Speed * 0.03
             
+            -- 根據速度計算每次移動的距離
+            local moveDistance = TrackConfig.Speed * 0.03  -- 0.03是task.wait的時間
+            
+            -- 如果移動距離大於實際距離，直接設定位置
             if moveDistance >= distance then
                 hrp.CFrame = CFrame.new(offsetPos)
             else
+                -- 否則移動一部分距離
                 local newPos = currentPos + direction * moveDistance
                 hrp.CFrame = CFrame.new(newPos)
             end
         end
         
+        -- 重置所有物理影響
         hrp.Velocity = Vector3.zero
         hrp.RotVelocity = Vector3.zero
         hrp.AssemblyLinearVelocity = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
         
+        -- 確保 Humanoid 不會干擾
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if humanoid then
             humanoid.PlatformStand = true
             humanoid.AutoRotate = false
         end
         
+        -- 面向目標
         local lookDir = (Vector3.new(targetPos.X, 0, targetPos.Z) - Vector3.new(hrp.Position.X, 0, hrp.Position.Z)).Unit
         if lookDir.Magnitude > 0.1 then
             hrp.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + lookDir)
         end
     end
     
+    -- 關閉穿牆
     DisableNoClip()
     
+    -- 恢復 Humanoid 設定
     local character = LocalPlayer.Character
     if character then
         local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -1749,11 +1914,13 @@ local function TrackPlayer(target)
     TrackConfig.TrackThread = nil
     TrackConfig.Target = nil
     
+    -- 更新按鈕文字
     if trackButton then
         trackButton:SetTitle("開啟追蹤傳送")
     end
 end
 
+-- 開始追蹤傳送
 local function StartTrackPlayer(player)
     if not player or player == LocalPlayer then
         WindUI:Notify({ Title = "追蹤傳送", Content = "請選擇有效的玩家", Duration = 2 })
@@ -1765,6 +1932,7 @@ local function StartTrackPlayer(player)
         task.wait(0.1)
     end
     
+    -- 設定 Humanoid 為平台站立，避免干擾
     local character = LocalPlayer.Character
     if character then
         local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -1786,6 +1954,7 @@ local function StartTrackPlayer(player)
         Duration = 3 
     })
     
+    -- 更新按鈕文字
     if trackButton then
         trackButton:SetTitle("關閉追蹤傳送")
     end
@@ -1793,6 +1962,7 @@ local function StartTrackPlayer(player)
     return true
 end
 
+-- 停止追蹤傳送
 local function StopTrackPlayer()
     TrackConfig.Enabled = false
     if TrackConfig.TrackThread then
@@ -1801,8 +1971,10 @@ local function StopTrackPlayer()
     end
     TrackConfig.Target = nil
     
+    -- 關閉穿牆
     DisableNoClip()
     
+    -- 恢復 Humanoid 設定
     local character = LocalPlayer.Character
     if character then
         local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -1822,11 +1994,15 @@ local function StopTrackPlayer()
     
     WindUI:Notify({ Title = "追蹤傳送", Content = "已停止追蹤 (碰撞已恢復)", Duration = 2 })
     
+    -- 更新按鈕文字
     if trackButton then
         trackButton:SetTitle("開啟追蹤傳送")
     end
 end
 
+-- ==================== 直接傳送功能（不受飛行干擾）====================
+
+-- 直接傳送循環 - 使用 CFrame 直接設定位置
 local function InstantTeleportToPlayer(target)
     local runConnection
     runConnection = RunService.Heartbeat:Connect(function()
@@ -1847,6 +2023,7 @@ local function InstantTeleportToPlayer(target)
         local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
         if not hrp or not targetRoot then return end
         
+        -- 計算目標位置加上XYZ偏離
         local targetPos = targetRoot.Position
         local offsetPos = Vector3.new(
             targetPos.X + TrackConfig.OffsetX,
@@ -1854,8 +2031,10 @@ local function InstantTeleportToPlayer(target)
             targetPos.Z + TrackConfig.OffsetZ
         )
         
+        -- 直接設定 CFrame
         hrp.CFrame = CFrame.new(offsetPos)
         
+        -- 重置所有物理影響
         hrp.Velocity = Vector3.zero
         hrp.RotVelocity = Vector3.zero
         hrp.AssemblyLinearVelocity = Vector3.zero
@@ -1865,6 +2044,7 @@ local function InstantTeleportToPlayer(target)
     InstantConfig.TeleportConnection = runConnection
 end
 
+-- 開始直接傳送
 local function StartInstantTeleport(player)
     if not player or player == LocalPlayer then
         WindUI:Notify({ Title = "直接傳送", Content = "請選擇有效的玩家", Duration = 2 })
@@ -1895,6 +2075,7 @@ local function StartInstantTeleport(player)
     return true
 end
 
+-- 停止直接傳送
 local function StopInstantTeleport()
     InstantConfig.Enabled = false
     if InstantConfig.TeleportConnection then
@@ -1910,6 +2091,9 @@ local function StopInstantTeleport()
     end
 end
 
+-- ==================== 單次傳送功能（不受飛行干擾）====================
+
+-- 執行單次傳送
 local function PerformSingleTeleport(player)
     if not player or player == LocalPlayer then
         WindUI:Notify({ Title = "單次傳送", Content = "請選擇有效的玩家", Duration = 2 })
@@ -1940,6 +2124,7 @@ local function PerformSingleTeleport(player)
         return false
     end
     
+    -- 計算目標位置加上XYZ偏離
     local targetPos = targetRoot.Position
     local offsetPos = Vector3.new(
         targetPos.X + TrackConfig.OffsetX,
@@ -1947,8 +2132,10 @@ local function PerformSingleTeleport(player)
         targetPos.Z + TrackConfig.OffsetZ
     )
     
+    -- 直接傳送一次
     hrp.CFrame = CFrame.new(offsetPos)
     
+    -- 重置所有物理影響
     hrp.Velocity = Vector3.zero
     hrp.RotVelocity = Vector3.zero
     hrp.AssemblyLinearVelocity = Vector3.zero
@@ -1964,6 +2151,7 @@ local function PerformSingleTeleport(player)
     return true
 end
 
+-- 停止所有功能
 local function StopAllFunctions()
     if TrackConfig.Enabled then
         StopTrackPlayer()
@@ -1973,7 +2161,7 @@ local function StopAllFunctions()
     end
 end
 
--- 血量偵測配置
+-- ==================== 血量偵測配置（智能觸發 + 無限傳送 + 無冷卻）===================
 local HealthDetectConfig = {
     Enabled = false,
     HealthThreshold = 30,
@@ -1982,13 +2170,17 @@ local HealthDetectConfig = {
     ShowNotifications = true,
     OnlyInCombat = false,
     TeleportCount = 0,
-    PlayerHealthState = "NORMAL",
+    
+    -- 狀態控制（無冷卻）
+    PlayerHealthState = "NORMAL",  -- 狀態: "NORMAL" (正常), "LOW" (低血量)
     LastTeleportTime = 0,
     TeleportTriggered = false,
 }
 
+-- 初始化所有玩家的狀態
 local playerHealthStates = {}
 
+-- 重置特定玩家的狀態
 local function resetPlayerHealthState(player)
     if player then
         playerHealthStates[player.UserId] = {
@@ -1999,6 +2191,7 @@ local function resetPlayerHealthState(player)
     end
 end
 
+-- 獲取玩家當前狀態
 local function getPlayerHealthState(player)
     if not playerHealthStates[player.UserId] then
         resetPlayerHealthState(player)
@@ -2006,11 +2199,13 @@ local function getPlayerHealthState(player)
     return playerHealthStates[player.UserId]
 end
 
+-- 更新玩家血量狀態（無冷卻版本）
 local function updatePlayerHealthState(player, currentHealthPercent)
     local stateData = getPlayerHealthState(player)
     local currentTime = tick()
     
     if currentHealthPercent <= HealthDetectConfig.HealthThreshold then
+        -- 低血量狀態
         if stateData.state == "NORMAL" then
             stateData.lastLowTime = currentTime
             stateData.state = "LOW"
@@ -2022,6 +2217,7 @@ local function updatePlayerHealthState(player, currentHealthPercent)
             end
         end
     else
+        -- 血量恢復正常 - 直接回到正常狀態
         if stateData.state == "LOW" then
             stateData.state = "NORMAL"
             stateData.teleportTriggered = false
@@ -2031,10 +2227,12 @@ local function updatePlayerHealthState(player, currentHealthPercent)
     return "NO_ACTION"
 end
 
+-- 自定義座標（預設為 0,0,0）
 local CustomX = 0
 local CustomY = 0
 local CustomZ = 0
 
+-- 創建地點列表（用於下拉選單）
 local sea2Locations = {
     ["天鵝的房間"] = CFrame.new(-287.37, 305.81, 592.98),
     ["豪宅"] = CFrame.new(2286.93, 15.06, 910.51),
@@ -2069,6 +2267,7 @@ for name, _ in pairs(TeleportLocations) do
     table.insert(locationNames, name)
 end
 
+-- 執行傳送（無限傳送）
 local function performHealthTeleport()
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then
@@ -2118,6 +2317,7 @@ local function performHealthTeleport()
     return false
 end
 
+-- 重置所有玩家的狀態（當功能關閉時）
 local function resetAllHealthStates()
     playerHealthStates = {}
     HealthDetectConfig.TeleportCount = 0
@@ -2125,6 +2325,7 @@ local function resetAllHealthStates()
     HealthDetectConfig.TeleportTriggered = false
 end
 
+-- 主要檢測循環
 local function startHealthDetection()
     task.spawn(function()
         while HealthDetectConfig.Enabled do
@@ -2152,8 +2353,15 @@ local function startHealthDetection()
     end)
 end
 
+-- ==================== 玩家列表管理（純手動刷新 - 使用 Refresh 方法）====================
+
+-- 刷新玩家列表 - 使用 Refresh 方法
 local function RefreshPlayerList()
-    WindUI:Notify({ Title = "玩家列表", Content = "正在重新載入...", Duration = 1 })
+    WindUI:Notify({ 
+        Title = "玩家列表", 
+        Content = "正在重新載入...", 
+        Duration = 1 
+    })
 
     local newPlayerList = {}
     local newPlayerMap = {}
@@ -2168,13 +2376,17 @@ local function RefreshPlayerList()
     playerList = newPlayerList
     playerMap = newPlayerMap
 
+    -- 如果有功能在運行，全部關閉
     if TrackConfig.Enabled or InstantConfig.Enabled then
         StopAllFunctions()
     end
 
+    -- 使用 Refresh 方法刷新下拉選單
     if playerDropdown then
         if #playerList > 0 then
+            -- 直接使用 Refresh 方法
             playerDropdown:Refresh(playerList)
+            -- 如果有 SetValue 方法，可以選擇設置預設值
             pcall(function()
                 playerDropdown:SetValue("請選擇玩家")
             end)
@@ -2188,20 +2400,29 @@ local function RefreshPlayerList()
 
     WindUI:Notify({ 
         Title = "玩家列表", 
-        Content = #playerList > 0 and ("重新載入成功，找到 " .. #playerList .. " 位玩家") or "目前沒有其他玩家在線", 
+        Content = #playerList > 0 and 
+            ("重新載入成功，找到 " .. #playerList .. " 位玩家") 
+            or "目前沒有其他玩家在線", 
         Duration = 2 
     })
 end
 
+-- 檢查目標玩家是否存在的函數
 local function CheckTargetPlayer()
     if not selectedPlayer or not playerMap[selectedPlayer.Name] then
-        WindUI:Notify({ Title = "提示", Content = "目標玩家不存在，請重新選擇", Duration = 3 })
+        WindUI:Notify({ 
+            Title = "提示", 
+            Content = "目標玩家不存在，請重新選擇", 
+            Duration = 3 
+        })
         selectedPlayer = nil
+        -- 注意：這裡不自動刷新，只清除選擇
         return false
     end
     return true
 end
 
+-- 定期檢查目標是否存在（這個功能保留，但不會自動刷新列表）
 local function StartTargetCheckLoop()
     task.spawn(function()
         while true do
@@ -2217,8 +2438,14 @@ local function StartTargetCheckLoop()
                 end
                 
                 if not targetStillExists then
-                    WindUI:Notify({ Title = "目標離開", Content = "追蹤目標已離開遊戲，自動關閉傳送", Duration = 3, Icon = "info" })
+                    WindUI:Notify({ 
+                        Title = "目標離開", 
+                        Content = "追蹤目標已離開遊戲，自動關閉傳送", 
+                        Duration = 3,
+                        Icon = "info"
+                    })
                     StopTrackPlayer()
+                    -- 清除選擇的玩家
                     selectedPlayer = nil
                 end
             end
@@ -2233,8 +2460,14 @@ local function StartTargetCheckLoop()
                 end
                 
                 if not targetStillExists then
-                    WindUI:Notify({ Title = "目標離開", Content = "傳送目標已離開遊戲，自動關閉傳送", Duration = 3, Icon = "info" })
+                    WindUI:Notify({ 
+                        Title = "目標離開", 
+                        Content = "傳送目標已離開遊戲，自動關閉傳送", 
+                        Duration = 3,
+                        Icon = "info"
+                    })
                     StopInstantTeleport()
+                    -- 清除選擇的玩家
                     selectedPlayer = nil
                 end
             end
@@ -2242,6 +2475,7 @@ local function StartTargetCheckLoop()
     end)
 end
 
+-- 角色重生處理
 LocalPlayer.CharacterAdded:Connect(function(newCharacter)
     task.wait(1)
     
@@ -2264,8 +2498,11 @@ LocalPlayer.CharacterAdded:Connect(function(newCharacter)
     end
 end)
 
--- 傳送標籤頁 UI
+-- ===================== 傳送標籤頁 UI =====================
+
 if Tabs and Tabs.TeleportTab then
+    
+    -- 初始化玩家列表
     playerList = {}
     playerMap = {}
     for _, player in ipairs(Players:GetPlayers()) do
@@ -2275,22 +2512,29 @@ if Tabs and Tabs.TeleportTab then
         end
     end
 
+    -- 刷新按鈕（唯一的手動刷新方式）
     refreshButton = Tabs.TeleportTab:Button({
         Title = "🔄 重新載入玩家列表",
         Callback = RefreshPlayerList
     })
 
+    -- 玩家選擇下拉選單 - 使用 Refresh 方法
     if #playerList > 0 then
         playerDropdown = Tabs.TeleportTab:Dropdown({
             Title = "選擇目標玩家",
             Values = playerList,
-            Value = "請選擇玩家",
+            Value = "請選擇玩家",   -- 固定預設
             Callback = function(selected)
                 if selected ~= "請選擇玩家" and selected ~= "目前沒有其他玩家" then
                     selectedPlayer = playerMap[selected]
                     
+                    -- 如果切換目標時有功能在運行，提示用戶
                     if TrackConfig.Enabled or InstantConfig.Enabled then
-                        WindUI:Notify({ Title = "提示", Content = "已切換目標玩家，請重新開啟功能", Duration = 3 })
+                        WindUI:Notify({ 
+                            Title = "提示", 
+                            Content = "已切換目標玩家，請重新開啟功能", 
+                            Duration = 3 
+                        })
                         StopAllFunctions()
                     end
                 else
@@ -2309,10 +2553,14 @@ if Tabs and Tabs.TeleportTab then
         })
     end
 
+    -- 啟動定期檢查（只檢查目標是否存在，不自動刷新列表）
     StartTargetCheckLoop()
 
+    -- ==================== 追蹤傳送區域 ====================
+    
     Tabs.TeleportTab:Divider()
 
+    -- 速度設定
     local speedInput = Tabs.TeleportTab:Input({
         Title = "追蹤速度",
         Value = tostring(TrackConfig.Speed),
@@ -2322,6 +2570,7 @@ if Tabs and Tabs.TeleportTab then
         end
     })
 
+    -- X軸偏離設定
     local offsetXInput = Tabs.TeleportTab:Input({
         Title = "X軸偏離",
         Value = tostring(TrackConfig.OffsetX),
@@ -2331,6 +2580,7 @@ if Tabs and Tabs.TeleportTab then
         end
     })
 
+    -- Y軸偏離設定
     local offsetYInput = Tabs.TeleportTab:Input({
         Title = "Y軸偏離",
         Value = tostring(TrackConfig.OffsetY),
@@ -2340,6 +2590,7 @@ if Tabs and Tabs.TeleportTab then
         end
     })
 
+    -- Z軸偏離設定
     local offsetZInput = Tabs.TeleportTab:Input({
         Title = "Z軸偏離",
         Value = tostring(TrackConfig.OffsetZ),
@@ -2349,6 +2600,7 @@ if Tabs and Tabs.TeleportTab then
         end
     })
 
+    -- 追蹤傳送按鈕
     trackButton = Tabs.TeleportTab:Button({
         Title = "開啟追蹤傳送",
         Callback = function()
@@ -2356,10 +2608,16 @@ if Tabs and Tabs.TeleportTab then
                 StopTrackPlayer()
             else
                 if not selectedPlayer then
-                    WindUI:Notify({ Title = "追蹤傳送", Content = "請先選擇目標玩家", Duration = 3, Icon = "alert-triangle" })
+                    WindUI:Notify({ 
+                        Title = "追蹤傳送", 
+                        Content = "請先選擇目標玩家", 
+                        Duration = 3,
+                        Icon = "alert-triangle"
+                    })
                     return
                 end
                 
+                -- 檢查目標玩家是否還存在
                 if not CheckTargetPlayer() then
                     return
                 end
@@ -2373,8 +2631,11 @@ if Tabs and Tabs.TeleportTab then
         end
     })
 
+    -- ==================== 直接傳送區域 ====================
+    
     Tabs.TeleportTab:Divider()
 
+    -- 直接傳送按鈕
     instantButton = Tabs.TeleportTab:Button({
         Title = "開啟直接傳送",
         Callback = function()
@@ -2382,10 +2643,16 @@ if Tabs and Tabs.TeleportTab then
                 StopInstantTeleport()
             else
                 if not selectedPlayer then
-                    WindUI:Notify({ Title = "直接傳送", Content = "請先選擇目標玩家", Duration = 3, Icon = "alert-triangle" })
+                    WindUI:Notify({ 
+                        Title = "直接傳送", 
+                        Content = "請先選擇目標玩家", 
+                        Duration = 3,
+                        Icon = "alert-triangle"
+                    })
                     return
                 end
                 
+                -- 檢查目標玩家是否還存在
                 if not CheckTargetPlayer() then
                     return
                 end
@@ -2399,14 +2666,21 @@ if Tabs and Tabs.TeleportTab then
         end
     })
 
+    -- 單次傳送按鈕
     singleButton = Tabs.TeleportTab:Button({
         Title = "單次傳送",
         Callback = function()
             if not selectedPlayer then
-                WindUI:Notify({ Title = "單次傳送", Content = "請先選擇目標玩家", Duration = 3, Icon = "alert-triangle" })
+                WindUI:Notify({ 
+                    Title = "單次傳送", 
+                    Content = "請先選擇目標玩家", 
+                    Duration = 3,
+                    Icon = "alert-triangle"
+                })
                 return
             end
             
+            -- 檢查目標玩家是否還存在
             if not CheckTargetPlayer() then
                 return
             end
@@ -2417,6 +2691,8 @@ if Tabs and Tabs.TeleportTab then
 
     Tabs.TeleportTab:Divider()
 
+    -- ===================== 原有的傳送功能 =====================
+    
     Tabs.TeleportTab:Button({
         Title = "傳送至一海",
         Callback = function()
@@ -2477,6 +2753,7 @@ if Tabs and Tabs.TeleportTab then
         })
     end
 
+    -- ===================== 血量自動偵測傳送系統（智能觸發版 - 無限傳送 - 無冷卻）=====================
     Tabs.TeleportTab:Divider()
 
     Tabs.TeleportTab:Toggle({
@@ -2485,7 +2762,7 @@ if Tabs and Tabs.TeleportTab then
         Callback = function(state)
             HealthDetectConfig.Enabled = state
             if state then
-                resetAllHealthStates()
+                resetAllHealthStates()  -- 重置所有狀態
                 startHealthDetection()
                 WindUI:Notify({
                     Title = "血量偵測（智能模式）",
@@ -2508,6 +2785,7 @@ if Tabs and Tabs.TeleportTab then
         Value = { Min = 1, Max = 100, Default = 30 },
         Callback = function(value)
             HealthDetectConfig.HealthThreshold = value
+            -- 重置狀態，讓新的閾值生效
             resetAllHealthStates()
             WindUI:Notify({
                 Title = "血量閾值",
@@ -2588,6 +2866,7 @@ if Tabs and Tabs.TeleportTab then
             HealthDetectConfig.OnlyInCombat = state
         end
     })
+
 end
 
 -- ===================== 功能2標籤頁 =====================
@@ -2718,12 +2997,13 @@ local function startBuddhaLoop()
     end)
 end
 
--- 簡化版聚怪功能（可設定範圍，拉到玩家前方2單位）
+-- ===================== 簡化版聚怪功能（可設定範圍，拉到玩家前方2單位） =====================
 local SimpleBringMob = {
     Enabled = false,
-    Distance = 100000,
+    Distance = 100000,  -- 預設超遠距離
 }
 
+-- 設定聚怪範圍
 local function SetBringDistance(value)
     local dist = tonumber(value)
     if dist and dist > 0 then
@@ -2744,6 +3024,7 @@ local function SetBringDistance(value)
     end
 end
 
+-- 聚怪循環
 local simpleBringMobLoop = nil
 local function StartSimpleBringMob()
     if simpleBringMobLoop then
@@ -2753,7 +3034,7 @@ local function StartSimpleBringMob()
     
     simpleBringMobLoop = task.spawn(function()
         while SimpleBringMob.Enabled do
-            task.wait(0.1)
+            task.wait(0.1)  -- 每0.1秒執行一次
             
             pcall(function()
                 local MyCharacter = game.Players.LocalPlayer.Character
@@ -2762,10 +3043,12 @@ local function StartSimpleBringMob()
                 local MyRoot = MyCharacter:FindFirstChild("HumanoidRootPart")
                 if not MyRoot then return end
                 
+                -- 計算玩家前方2單位位置
                 local lookVector = MyRoot.CFrame.LookVector
-                local targetPos = MyRoot.Position + (lookVector * 2)
+                local targetPos = MyRoot.Position + (lookVector * 2)  -- 固定2單位
                 local targetCFrame = CFrame.new(targetPos)
                 
+                -- 查找所有怪物（包含Boss）
                 local Enemies = workspace:FindFirstChild("Enemies")
                 if not Enemies then return end
                 
@@ -2774,8 +3057,10 @@ local function StartSimpleBringMob()
                     if hrp then
                         local distance = (hrp.Position - MyRoot.Position).Magnitude
                         
+                        -- 只要距離小於設定值就拉過來
                         if distance <= SimpleBringMob.Distance then
                             hrp.CFrame = targetCFrame
+                            -- 不縮小怪物，保持原大小
                         end
                     end
                 end
@@ -2785,6 +3070,7 @@ local function StartSimpleBringMob()
     end)
 end
 
+-- 停止聚怪
 local function StopSimpleBringMob()
     SimpleBringMob.Enabled = false
     if simpleBringMobLoop then
@@ -2797,6 +3083,8 @@ local function StopSimpleBringMob()
         Duration = 2 
     })
 end
+
+-- ===================== 聚怪功能註記（新增） =====================
 
 -- 免控旋轉功能
 local ROTATION_CONFIG = {
@@ -2971,7 +3259,7 @@ end)
 
 Tabs.ActivityTab:Divider()
 
--- ===================== 聚怪功能（可設定範圍，前方2單位）- 添加註記 =====================
+-- ===================== 聚怪功能（可設定範圍，前方2單位） =====================
 
 -- 聚怪範圍輸入
 Tabs.ActivityTab:Input({
@@ -2983,8 +3271,7 @@ Tabs.ActivityTab:Input({
     end
 })
 
-
--- 聚怪開關
+-- 單一開關按鍵（包含Boss和小怪，固定前方2單位）- 修改標題和通知
 Tabs.ActivityTab:Toggle({
     Title = "⚡ 一鍵聚怪 ⚠️(可能只有視覺效果)",
     Value = false,
@@ -3076,6 +3363,7 @@ Tabs.ActivityTab:Button({
     end
 })
 
+-- 免控旋轉功能
 Tabs.ActivityTab:Divider()
 
 Tabs.ActivityTab:Toggle({
@@ -3091,7 +3379,7 @@ Tabs.ActivityTab:Toggle({
     end
 })
 
--- ===================== 特效顏色更換 =====================
+-- 特效顏色更換 
 Tabs.texiaoTab:Paragraph({
     Title = "特效更換",
     Desc = "只有你自己能看到",
@@ -3322,13 +3610,22 @@ end
 createCommands()
 
 print("小傑腳本已完全加載完成！")
-print("✅ FOV 視角範圍功能已整合（開關正常）")
-print("✅ 聚怪功能已添加註記（可能只有視覺效果）")
 print("新快速攻擊系統已整合完成！")
 print("免控旋轉功能已添加！")
 print("跳躍高度修改功能已添加（範圍10-1000）！")
 print("血量自動偵測傳送功能已添加（智能觸發 + 無限傳送 + 無冷卻）！")
 print("追蹤傳送 + 直接傳送 + 單次傳送三合一系統已整合！")
-print("玩家列表重新載入功能已完成！")
+print("追蹤傳送新增速度調整功能！")
+print("追蹤傳送完全不受飛行影響！")
+print("追蹤傳送開啟時自動穿牆，關閉時完全恢復碰撞！")
+print("玩家列表重新載入功能已完成！使用 Refresh 方法！")
+print("目標玩家不存在時會自動提示！")
+print("目標離開時自動關閉傳送！")
+print("已移除自動刷新功能，改為純手動刷新！")
+print("界面已簡化，移除所有特殊顏色標題")
+print("移除岩漿已改為移除岩漿and鬼船傷害")
 print("手機跳躍功能已整合！")
 print("水上行走功能已整合！")
+print("聚怪功能已整合（可設定範圍，固定前方2單位）！")
+print("✅ FOV 視角範圍功能已新增！")
+print("✅ 聚怪功能已添加視覺效果註記！")
