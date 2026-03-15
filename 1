@@ -832,6 +832,17 @@ Tabs.GeneralTab:Button({
     end
 })
 
+Tabs.GeneralTab:Button({
+    Title = "鎖人",
+    Icon = "monitor",
+    Callback = function()
+        WindUI:Notify({ Title = "", Content = "正在加載鎖人腳本...", Duration = 3 })
+        pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/56123asda/546546/refs/heads/main/%E8%87%AA%E8%8B%97(%E6%93%8D%E4%BD%A0%E5%AA%BD%E7%BF%BB%E5%B1%81%E5%95%8A)"))()
+        end)
+    end
+})
+
 -- ===================== 範圍攻擊系統 ===================== 
  
  local VirtualInputManager = game:GetService("VirtualInputManager") 
