@@ -832,17 +832,6 @@ Tabs.GeneralTab:Button({
     end
 })
 
-Tabs.GeneralTab:Button({
-    Title = "鎖人",
-    Icon = "monitor",
-    Callback = function()
-        WindUI:Notify({ Title = "鎖人", Content = "正在加載腳本...", Duration = 3 })
-        pcall(function()
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/Totocoems/Ace/main/Ace"))()
-        end)
-    end
-})
-
 -- ===================== 範圍攻擊系統 ===================== 
  
  local VirtualInputManager = game:GetService("VirtualInputManager") 
