@@ -22,17 +22,46 @@ warn("小傑腳本已啟動，開始加載功能")
 -- ************************ 以下為原腳本本地核心功能（完整保留） ************************
 
 -- 加載 WindUI
-local success, WindUI = pcall(function()
-    return loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
-end)
+local WindUI
+local function LoadUI()
+    local urls = {
+        "https://raw.githubusercontent.com/Footagesus/WindUI/main/main.lua",
+        "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/main.lua",
+        "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
+        "https://raw.githubusercontent.com/Footagesus/WindUI/main/Main.lua"
+    }
+    
+    for _, url in ipairs(urls) do
+        local success, result = pcall(function()
+            return loadstring(game:HttpGet(url))()
+        end)
+        
+        if success and result then
+            return result
+        else
+            warn("無法從 " .. url .. " 加載 UI: " .. tostring(result))
+        end
+    end
+    return nil
+end
 
-if not success or not WindUI then
-    game:GetService("StarterGui"):SetCore("SendNotification",{
-        Title = "錯誤",
-        Text = "UI 加載失敗",
-        Duration = 5;
-    })
-    return
+WindUI = LoadUI()
+
+if not WindUI then
+    -- 如果還是失敗，嘗試最後一個穩定的 raw 連結
+    local success, result = pcall(function()
+        return loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/main.lua"))()
+    end)
+    if success and result then
+        WindUI = result
+    else
+        game:GetService("StarterGui"):SetCore("SendNotification",{
+            Title = "嚴重錯誤",
+            Text = "UI 加載失敗，請檢查網絡",
+            Duration = 10;
+        })
+        return
+    end
 end
 
 -- 設置白色主題
@@ -63,7 +92,7 @@ local translateAccelEnabled = false
 local _G = _G or getfenv(0)._G
 _G.FastAttack = _G.FastAttack ~= nil and _G.FastAttack or true
 
--- 確保 FOV 配置正確初始化（新增）
+-- 確保 FOV 配置正確初始化
 getgenv().CaiHuaConfig = getgenv().CaiHuaConfig or {
     Toggles = {
         FOV_Active = false
@@ -74,18 +103,31 @@ getgenv().CaiHuaConfig = getgenv().CaiHuaConfig or {
 }
 
 -- 創建主窗口
-local Window = WindUI:CreateWindow({
-    Title = "小傑腳本中心",
-    Icon = "rbxassetid://6031280882",
-    Author = "小傑",
-    Folder = "WindUI",
-    Size = UDim2.fromOffset(580, 460),
-    Transparent = false,
-    Theme = "Light",
-    ScrollBarEnabled = true,
-    Background = "rbxassetid://140187958380334",  -- 你的圖片 ID
-    BackgroundImageTransparency = 0.4,            -- 透明度（0=完全不透明，1=完全透明，建議 0.3~0.5 讓文字清楚）
-})
+local Window
+local success_window, err_window = pcall(function()
+    Window = WindUI:CreateWindow({
+        Title = "小傑腳本中心",
+        Icon = "rbxassetid://6031280882",
+        Author = "小傑",
+        Folder = "WindUI",
+        Size = UDim2.fromOffset(580, 460),
+        Transparent = false,
+        Theme = "Light",
+        ScrollBarEnabled = true,
+        Background = "rbxassetid://140187958380334",
+        BackgroundImageTransparency = 0.4,
+    })
+end)
+
+if not success_window or not Window then
+    warn("UI 窗口創建失敗: ", err_window)
+    game:GetService("StarterGui"):SetCore("SendNotification",{
+        Title = "錯誤",
+        Text = "UI 創建失敗: " .. tostring(err_window),
+        Duration = 10;
+    })
+    return
+end
 
 -- N 快捷鍵開關 UI
 Window:SetToggleKey(Enum.KeyCode.N)
@@ -103,7 +145,7 @@ Tabs.GeneralTab = functionSection:Tab({ Title = "功能1", Icon = "settings" })
 Tabs.AttackTab = functionSection:Tab({ Title = "範圍攻擊", Icon = "sword" })
 Tabs.ESPTab = functionSection:Tab({ Title = "透視", Icon = "eye" })
 Tabs.TeleportTab = functionSection:Tab({ Title = "傳送", Icon = "map-pin" })
-Tabs.ActivityTab = functionSection:Tab({ Title = "功能2", Icon = "zap" })
+Tabs.ActivityTab = functionSection:Tab({ Title = "功能2", Icon = "info" })
 Tabs.texiaoTab = configSection:Tab({ Title = "更改特效", Icon = "palette" })
 Tabs.ThemeTab = configSection:Tab({ Title = "主題顏色", Icon = "palette" })
 
@@ -134,7 +176,7 @@ Tabs.GeneralTab:Slider({
     end
 })
 
--- ===================== FOV 獨立功能（新增） =====================
+-- ===================== FOV 獨立功能 =====================
 
 -- FOV 開關
 Tabs.GeneralTab:Toggle({
@@ -790,312 +832,323 @@ Tabs.GeneralTab:Button({
     end
 })
 
--- ===================== 範圍攻擊系統 =====================
-
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local Modules = ReplicatedStorage:WaitForChild("Modules")
-local Net = Modules:WaitForChild("Net")
-local RegisterAttack = Net:WaitForChild("RE/RegisterAttack")
-local RegisterHit = Net:WaitForChild("RE/RegisterHit")
-
-local AttackConfig = {
-    Enabled = true,
-    AttackDistance = 5000,
-    AttackDelay = 0.3,
-    AttackMobs = true,
-    AttackPlayers = true,
-    MaxCombo = 3,
-    ComboResetTime = 0.3
-}
-
-local UniversalAttack = {}
-UniversalAttack.__index = UniversalAttack
-
-function UniversalAttack.new()
-    local self = setmetatable({
-        Debounce = 0,
-        ComboDebounce = 0,
-        ShootDebounce = 0,
-        M1Combo = 0,
-        EnemyRootPart = nil,
-        LastAttackTime = 0,
-        LastScanTime = 0,
-        CachedTargets = {},
-        AttackConnection = nil
-    }, UniversalAttack)
-    
-    return self
-end
-
-function UniversalAttack:IsTargetAlive(target)
-    local humanoid = target and target:FindFirstChild("Humanoid")
-    return humanoid and humanoid.Health > 0
-end
-
-function UniversalAttack:GetAllTargets(character)
-    local currentTime = tick()
-    if currentTime - self.LastScanTime < 0.3 and #self.CachedTargets > 0 then
-        return self.CachedTargets
-    end
-    
-    local targets = {}
-    local characterPos = character and character:GetPivot().Position
-    
-    if not characterPos then
-        self.CachedTargets = targets
-        return targets
-    end
-    
-    if AttackConfig.AttackMobs then
-        local enemies = Workspace:FindFirstChild("Enemies")
-        if enemies then
-            for _, enemy in ipairs(enemies:GetChildren()) do
-                if enemy ~= character and self:IsTargetAlive(enemy) then
-                    local rootPart = enemy:FindFirstChild("HumanoidRootPart")
-                    if rootPart and (characterPos - rootPart.Position).Magnitude <= AttackConfig.AttackDistance then
-                        if not self.EnemyRootPart then
-                            self.EnemyRootPart = rootPart
-                        end
-                        table.insert(targets, {enemy, rootPart})
-                    end
-                end
-            end
-        end
-    end
-    
-    if AttackConfig.AttackPlayers then
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                local targetChar = player.Character
-                if targetChar and self:IsTargetAlive(targetChar) then
-                    local rootPart = targetChar:FindFirstChild("HumanoidRootPart")
-                    if rootPart and (characterPos - rootPart.Position).Magnitude <= AttackConfig.AttackDistance then
-                        if not self.EnemyRootPart then
-                            self.EnemyRootPart = rootPart
-                        end
-                        table.insert(targets, {targetChar, rootPart})
-                    end
-                end
-            end
-        end
-    end
-    
-    self.LastScanTime = currentTime
-    self.CachedTargets = targets
-    return targets
-end
-
-function UniversalAttack:GetCombo()
-    local currentTime = tick()
-    local combo = (currentTime - self.ComboDebounce) <= AttackConfig.ComboResetTime and self.M1Combo or 0
-    combo = combo >= AttackConfig.MaxCombo and 1 or combo + 1
-    self.ComboDebounce = currentTime
-    self.M1Combo = combo
-    return combo
-end
-
-function UniversalAttack:HandleFruitAttack(character, equipped, combo)
-    local targets = self:GetAllTargets(character)
-    if not targets[1] then return end
-    
-    local fruitRemote = equipped:FindFirstChild("LeftClickRemote")
-    if fruitRemote then
-        local direction = (targets[1][2].Position - character:GetPivot().Position).Unit
-        fruitRemote:FireServer(direction, combo)
-    end
-end
-
-function UniversalAttack:HandleMeleeAttack(character)
-    self.EnemyRootPart = nil
-    local targets = self:GetAllTargets(character)
-    
-    if self.EnemyRootPart then
-        RegisterAttack:FireServer(AttackConfig.AttackDelay)
-        RegisterHit:FireServer(self.EnemyRootPart, targets)
-    end
-end
-
-function UniversalAttack:Attack()
-    if not AttackConfig.Enabled then return end
-    
-    local currentTime = tick()
-    if (currentTime - self.Debounce) < AttackConfig.AttackDelay then return end
-    
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("Humanoid") then return end
-    
-    local equipped = character:FindFirstChildOfClass("Tool")
-    if not equipped then return end
-    
-    local combo = self:GetCombo()
-    self.Debounce = combo >= AttackConfig.MaxCombo and (currentTime + 0.05) or currentTime
-    
-    local toolTip = equipped.ToolTip
-    if toolTip == "Blox Fruit" then
-        self:HandleFruitAttack(character, equipped, combo)
-    elseif toolTip == "Sword" or toolTip == "Melee" then
-        self:HandleMeleeAttack(character)
-    else
-        self:HandleMeleeAttack(character)
-    end
-    
-    self.LastAttackTime = currentTime
-end
-
-local attackSystem = UniversalAttack.new()
-local attackConnection = nil
-
-local function startAttackLoop()
-    if attackConnection then
-        attackConnection:Disconnect()
-        attackConnection = nil
-    end
-    
-    attackSystem = UniversalAttack.new()
-    
-    attackConnection = RunService.Heartbeat:Connect(function()
-        if AttackConfig.Enabled then
-            pcall(function()
-                attackSystem:Attack()
-            end)
-        end
-    end)
-end
-
-startAttackLoop()
-
-LocalPlayer.CharacterAdded:Connect(function(character)
-    task.wait(2)
-    if AttackConfig.Enabled then
-        startAttackLoop()
-    end
-end)
-
-LocalPlayer.CharacterRemoving:Connect(function()
-    if attackConnection then
-        attackConnection:Disconnect()
-        attackConnection = nil
-    end
-end)
-
-local function ReconnectRemotes()
-    Modules = ReplicatedStorage:WaitForChild("Modules")
-    Net = Modules:WaitForChild("Net")
-    RegisterAttack = Net:WaitForChild("RE/RegisterAttack")
-    RegisterHit = Net:WaitForChild("RE/RegisterHit")
-end
-
-local function OnCharacterRespawn()
-    ReconnectRemotes()
-    
-    if AttackConfig.Enabled then
-        task.wait(1)
-        startAttackLoop()
-    end
-end
-
-LocalPlayer.CharacterAdded:Connect(function(character)
-    task.wait(2)
-    OnCharacterRespawn()
-end)
-
--- ===================== 範圍攻擊標籤頁 UI =====================
-
-Tabs.AttackTab:Toggle({
-    Title = "快速攻擊開關",
-    Value = true,
-    Callback = function(state)
-        AttackConfig.Enabled = state
-        if state then
-            startAttackLoop()
-            WindUI:Notify({ 
-                Title = "快速攻擊", 
-                Content = "已開啟", 
-                Duration = 2 
-            })
-        else
-            if attackConnection then
-                attackConnection:Disconnect()
-                attackConnection = nil
-            end
-            WindUI:Notify({ 
-                Title = "快速攻擊", 
-                Content = "已關閉", 
-                Duration = 2 
-            })
-        end
+Tabs.GeneralTab:Button({
+    Title = "鎖人",
+    Icon = "monitor",
+    Callback = function()
+        WindUI:Notify({ Title = "鎖人", Content = "正在加載腳本...", Duration = 3 })
+        pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/Totocoems/Ace/main/Ace"))()
+        end)
     end
 })
 
-Tabs.AttackTab:Divider()
-
-Tabs.AttackTab:Slider({
-    Title = "攻擊範圍",
-    Value = { Min = 50, Max = 10000, Default = 5000 },
-    Callback = function(value)
-        AttackConfig.AttackDistance = value
-        WindUI:Notify({ 
-            Title = "攻擊範圍", 
-            Content = "已設置為: " .. value, 
-            Duration = 2 
-        })
-    end
-})
-
-Tabs.AttackTab:Input({
-    Title = "攻擊速度（秒）",
-    Value = "0.3",
-    Placeholder = "輸入攻擊間隔 (例: 0.1)",
-    Callback = function(value)
-        local speed = tonumber(value)
-        if speed and speed >= 0.03 and speed <= 2 then
-            AttackConfig.AttackDelay = speed
-            WindUI:Notify({ 
-                Title = "攻擊速度", 
-                Content = string.format("已設置為: %.3f秒 (約%d次/秒)", speed, math.floor(1/speed)), 
-                Duration = 3 
-            })
-            
-            if AttackConfig.Enabled then
-                startAttackLoop()
-            end
-        else
-            WindUI:Notify({ 
-                Title = "錯誤", 
-                Content = "請輸入 0.03 到 2 之間的數字", 
-                Duration = 3 
-            })
-        end
-    end
-})
-
-Tabs.AttackTab:Divider()
-
-Tabs.AttackTab:Toggle({
-    Title = "攻擊NPC/怪物",
-    Value = true,
-    Callback = function(state)
-        AttackConfig.AttackMobs = state
-        WindUI:Notify({ 
-            Title = "攻擊NPC", 
-            Content = state and "已開啟" or "已關閉", 
-            Duration = 2 
-        })
-    end
-})
-
-Tabs.AttackTab:Toggle({
-    Title = "攻擊玩家",
-    Value = true,
-    Callback = function(state)
-        AttackConfig.AttackPlayers = state
-        WindUI:Notify({ 
-            Title = "攻擊玩家", 
-            Content = state and "已開啟" or "已關閉", 
-            Duration = 2 
-        })
-    end
-})
+-- ===================== 範圍攻擊系統 ===================== 
+ 
+ local VirtualInputManager = game:GetService("VirtualInputManager") 
+ local Modules = ReplicatedStorage:WaitForChild("Modules") 
+ local Net = Modules:WaitForChild("Net") 
+ local RegisterAttack = Net:WaitForChild("RE/RegisterAttack") 
+ local RegisterHit = Net:WaitForChild("RE/RegisterHit") 
+ 
+ local AttackConfig = { 
+     Enabled = true, 
+     AttackDistance = 5000, 
+     AttackDelay = 0.3, 
+     AttackMobs = true, 
+     AttackPlayers = true, 
+     MaxCombo = 3, 
+     ComboResetTime = 0.3 
+ } 
+ 
+ local UniversalAttack = {} 
+ UniversalAttack.__index = UniversalAttack 
+ 
+ function UniversalAttack.new() 
+     local self = setmetatable({ 
+         Debounce = 0, 
+         ComboDebounce = 0, 
+         ShootDebounce = 0, 
+         M1Combo = 0, 
+         EnemyRootPart = nil, 
+         LastAttackTime = 0, 
+         LastScanTime = 0, 
+         CachedTargets = {}, 
+         AttackConnection = nil 
+     }, UniversalAttack) 
+     
+     return self 
+ end 
+ 
+ function UniversalAttack:IsTargetAlive(target) 
+     local humanoid = target and target:FindFirstChild("Humanoid") 
+     return humanoid and humanoid.Health > 0 
+ end 
+ 
+ function UniversalAttack:GetAllTargets(character) 
+     local currentTime = tick() 
+     if currentTime - self.LastScanTime < 0.3 and #self.CachedTargets > 0 then 
+         return self.CachedTargets 
+     end 
+     
+     local targets = {} 
+     local characterPos = character and character:GetPivot().Position 
+     
+     if not characterPos then 
+         self.CachedTargets = targets 
+         return targets 
+     end 
+     
+     if AttackConfig.AttackMobs then 
+         local enemies = Workspace:FindFirstChild("Enemies") 
+         if enemies then 
+             for _, enemy in ipairs(enemies:GetChildren()) do 
+                 if enemy ~= character and self:IsTargetAlive(enemy) then 
+                     local rootPart = enemy:FindFirstChild("HumanoidRootPart") 
+                     if rootPart and (characterPos - rootPart.Position).Magnitude <= AttackConfig.AttackDistance then 
+                         if not self.EnemyRootPart then 
+                             self.EnemyRootPart = rootPart 
+                         end 
+                         table.insert(targets, {enemy, rootPart}) 
+                     end 
+                 end 
+             end 
+         end 
+     end 
+     
+     if AttackConfig.AttackPlayers then 
+         for _, player in ipairs(Players:GetPlayers()) do 
+             if player ~= LocalPlayer then 
+                 local targetChar = player.Character 
+                 if targetChar and self:IsTargetAlive(targetChar) then 
+                     local rootPart = targetChar:FindFirstChild("HumanoidRootPart") 
+                     if rootPart and (characterPos - rootPart.Position).Magnitude <= AttackConfig.AttackDistance then 
+                         if not self.EnemyRootPart then 
+                             self.EnemyRootPart = rootPart 
+                         end 
+                         table.insert(targets, {targetChar, rootPart}) 
+                     end 
+                 end 
+             end 
+         end 
+     end 
+     
+     self.LastScanTime = currentTime 
+     self.CachedTargets = targets 
+     return targets 
+ end 
+ 
+ function UniversalAttack:GetCombo() 
+     local currentTime = tick() 
+     local combo = (currentTime - self.ComboDebounce) <= AttackConfig.ComboResetTime and self.M1Combo or 0 
+     combo = combo >= AttackConfig.MaxCombo and 1 or combo + 1 
+     self.ComboDebounce = currentTime 
+     self.M1Combo = combo 
+     return combo 
+ end 
+ 
+ function UniversalAttack:HandleFruitAttack(character, equipped, combo) 
+     local targets = self:GetAllTargets(character) 
+     if not targets[1] then return end 
+     
+     local fruitRemote = equipped:FindFirstChild("LeftClickRemote") 
+     if fruitRemote then 
+         local direction = (targets[1][2].Position - character:GetPivot().Position).Unit 
+         fruitRemote:FireServer(direction, combo) 
+     end 
+ end 
+ 
+ function UniversalAttack:HandleMeleeAttack(character) 
+     self.EnemyRootPart = nil 
+     local targets = self:GetAllTargets(character) 
+     
+     if self.EnemyRootPart then 
+         RegisterAttack:FireServer(AttackConfig.AttackDelay) 
+         RegisterHit:FireServer(self.EnemyRootPart, targets) 
+     end 
+ end 
+ 
+ function UniversalAttack:Attack() 
+     if not AttackConfig.Enabled then return end 
+     
+     local currentTime = tick() 
+     if (currentTime - self.Debounce) < AttackConfig.AttackDelay then return end 
+     
+     local character = LocalPlayer.Character 
+     if not character or not character:FindFirstChild("Humanoid") then return end 
+     
+     local equipped = character:FindFirstChildOfClass("Tool") 
+     if not equipped then return end 
+     
+     local combo = self:GetCombo() 
+     self.Debounce = combo >= AttackConfig.MaxCombo and (currentTime + 0.05) or currentTime 
+     
+     local toolTip = equipped.ToolTip 
+     if toolTip == "Blox Fruit" then 
+         self:HandleFruitAttack(character, equipped, combo) 
+     elseif toolTip == "Sword" or toolTip == "Melee" then 
+         self:HandleMeleeAttack(character) 
+     else 
+         self:HandleMeleeAttack(character) 
+     end 
+     
+     self.LastAttackTime = currentTime 
+ end 
+ 
+ local attackSystem = UniversalAttack.new() 
+ local attackConnection = nil 
+ 
+ local function startAttackLoop() 
+     if attackConnection then 
+         attackConnection:Disconnect() 
+         attackConnection = nil 
+     end 
+     
+     attackSystem = UniversalAttack.new() 
+     
+     attackConnection = RunService.Heartbeat:Connect(function() 
+         if AttackConfig.Enabled then 
+             pcall(function() 
+                 attackSystem:Attack() 
+             end) 
+         end 
+     end) 
+ end 
+ 
+ startAttackLoop() 
+ 
+ LocalPlayer.CharacterAdded:Connect(function(character) 
+     task.wait(2) 
+     if AttackConfig.Enabled then 
+         startAttackLoop() 
+     end 
+ end) 
+ 
+ LocalPlayer.CharacterRemoving:Connect(function() 
+     if attackConnection then 
+         attackConnection:Disconnect() 
+         attackConnection = nil 
+     end 
+ end) 
+ 
+ local function ReconnectRemotes() 
+     Modules = ReplicatedStorage:WaitForChild("Modules") 
+     Net = Modules:WaitForChild("Net") 
+     RegisterAttack = Net:WaitForChild("RE/RegisterAttack") 
+     RegisterHit = Net:WaitForChild("RE/RegisterHit") 
+ end 
+ 
+ local function OnCharacterRespawn() 
+     ReconnectRemotes() 
+     
+     if AttackConfig.Enabled then 
+         task.wait(1) 
+         startAttackLoop() 
+     end 
+ end 
+ 
+ LocalPlayer.CharacterAdded:Connect(function(character) 
+     task.wait(2) 
+     OnCharacterRespawn() 
+ end) 
+ 
+ -- ===================== 範圍攻擊標籤頁 UI ===================== 
+ 
+ Tabs.AttackTab:Toggle({ 
+     Title = "快速攻擊開關", 
+     Value = true, 
+     Callback = function(state) 
+         AttackConfig.Enabled = state 
+         if state then 
+             startAttackLoop() 
+             WindUI:Notify({ 
+                 Title = "快速攻擊", 
+                 Content = "已開啟", 
+                 Duration = 2 
+             }) 
+         else 
+             if attackConnection then 
+                 attackConnection:Disconnect() 
+                 attackConnection = nil 
+             end 
+             WindUI:Notify({ 
+                 Title = "快速攻擊", 
+                 Content = "已關閉", 
+                 Duration = 2 
+             }) 
+         end 
+     end 
+ }) 
+ 
+ Tabs.AttackTab:Divider() 
+ 
+ Tabs.AttackTab:Slider({ 
+     Title = "攻擊範圍", 
+     Value = { Min = 50, Max = 10000, Default = 5000 }, 
+     Callback = function(value) 
+         AttackConfig.AttackDistance = value 
+         WindUI:Notify({ 
+             Title = "攻擊範圍", 
+             Content = "已設置為: " .. value, 
+             Duration = 2 
+         }) 
+     end 
+ }) 
+ 
+ Tabs.AttackTab:Input({ 
+     Title = "攻擊速度（秒）", 
+     Value = "0.3", 
+     Placeholder = "輸入攻擊間隔 (例: 0.1)", 
+     Callback = function(value) 
+         local speed = tonumber(value) 
+         if speed and speed >= 0.03 and speed <= 2 then 
+             AttackConfig.AttackDelay = speed 
+             WindUI:Notify({ 
+                 Title = "攻擊速度", 
+                 Content = string.format("已設置為: %.3f秒 (約%d次/秒)", speed, math.floor(1/speed)), 
+                 Duration = 3 
+             }) 
+             
+             if AttackConfig.Enabled then 
+                 startAttackLoop() 
+             end 
+         else 
+             WindUI:Notify({ 
+                 Title = "錯誤", 
+                 Content = "請輸入 0.03 到 2 之間的數字", 
+                 Duration = 3 
+             }) 
+         end 
+     end 
+ }) 
+ 
+ Tabs.AttackTab:Divider() 
+ 
+ Tabs.AttackTab:Toggle({ 
+     Title = "攻擊NPC/怪物", 
+     Value = true, 
+     Callback = function(state) 
+         AttackConfig.AttackMobs = state 
+         WindUI:Notify({ 
+             Title = "攻擊NPC", 
+             Content = state and "已開啟" or "已關閉", 
+             Duration = 2 
+         }) 
+     end 
+ }) 
+ 
+ Tabs.AttackTab:Toggle({ 
+     Title = "攻擊玩家", 
+     Value = true, 
+     Callback = function(state) 
+         AttackConfig.AttackPlayers = state 
+         WindUI:Notify({ 
+             Title = "攻擊玩家", 
+             Content = state and "已開啟" or "已關閉", 
+             Duration = 2 
+         }) 
+     end
+ })
 
 Tabs.AttackTab:Divider()
 
@@ -1659,7 +1712,7 @@ for _, p in pairs(Players:GetPlayers()) do
     setupPlayerConnections(p)
 end
 
--- ===================== 傳送標籤頁（追蹤傳送 + 直接傳送 + 單次傳送）=====================
+-- ===================== 傳送標籤頁（追蹤傳送 + 直接傳送 + 單次傳送 + 獨立循環傳送）=====================
 
 -- 追蹤傳送設定
 local TrackConfig = {
@@ -1667,8 +1720,8 @@ local TrackConfig = {
     Target = nil,
     OffsetX = 0,
     OffsetY = 0,
-    OffsetZ = 5,
-    Speed = 50,
+    OffsetZ = 0,  -- 修改為 0
+    Speed = 360,  -- 修改為 360
     TrackThread = nil,
 }
 
@@ -1679,9 +1732,20 @@ local InstantConfig = {
     TeleportConnection = nil,
 }
 
--- 單次傳送設定（只傳送一次）
+-- 單次傳送設定（只傳送一次）- 與追蹤傳送共用 XYZ 軸
 local SingleConfig = {
     Target = nil,
+}
+
+-- 循環傳送設定（獨立於追蹤傳送的XYZ軸，只能設定 Y 軸）
+local CycleConfig = {
+    Enabled = false,
+    Target = nil,
+    CycleThread = nil,
+    Interval = 0.1,
+    -- 循環傳送只能設定 Y 軸，X 軸和 Z 軸固定為 0
+    OffsetY = 0,  -- 只能設定 Y 軸
+    -- OffsetX 和 OffsetZ 已移除，固定為 0
 }
 
 -- 玩家列表相關變數
@@ -1691,13 +1755,14 @@ local selectedPlayer = nil
 local playerDropdown = nil
 local trackButton = nil
 local instantButton = nil
+local cycleButton = nil
 local singleButton = nil
 local refreshButton = nil
 
 -- 儲存原始碰撞狀態
 local originalCollisionStates = {}
 
--- 設定X軸偏離
+-- 設定X軸偏離（用於追蹤和直接傳送）
 local function SetOffsetX(value)
     value = tonumber(value)
     if not value or value < -5000 or value > 5000 then
@@ -1709,7 +1774,7 @@ local function SetOffsetX(value)
     return true
 end
 
--- 設定Y軸偏離
+-- 設定Y軸偏離（用於追蹤和直接傳送）
 local function SetOffsetY(value)
     value = tonumber(value)
     if not value or value < -5000 or value > 5000 then
@@ -1721,7 +1786,7 @@ local function SetOffsetY(value)
     return true
 end
 
--- 設定Z軸偏離
+-- 設定Z軸偏離（用於追蹤和直接傳送）
 local function SetOffsetZ(value)
     value = tonumber(value)
     if not value or value < -5000 or value > 5000 then
@@ -1742,6 +1807,30 @@ local function SetTrackSpeed(value)
     end
     TrackConfig.Speed = value
     WindUI:Notify({ Title = "追蹤傳送", Content = "速度已設為: " .. value, Duration = 2 })
+    return true
+end
+
+-- 設定循環間隔
+local function SetCycleInterval(value)
+    value = tonumber(value)
+    if not value or value < 0.01 or value > 5 then
+        WindUI:Notify({ Title = "錯誤", Content = "間隔請輸入 0.01 到 5 的數字", Duration = 2 })
+        return false
+    end
+    CycleConfig.Interval = value
+    WindUI:Notify({ Title = "循環傳送", Content = "循環間隔已設為: " .. value .. " 秒", Duration = 2 })
+    return true
+end
+
+-- 設定循環傳送 Y 軸偏離（只能設定 Y 軸）
+local function SetCycleOffsetY(value)
+    value = tonumber(value)
+    if not value or value < -5000 or value > 5000 then
+        WindUI:Notify({ Title = "錯誤", Content = "Y軸請輸入 -5000 到 5000 的數字", Duration = 2 })
+        return false
+    end
+    CycleConfig.OffsetY = value
+    WindUI:Notify({ Title = "循環傳送", Content = "循環 Y 軸偏離已設為: " .. value, Duration = 2 })
     return true
 end
 
@@ -1829,6 +1918,15 @@ local function TrackPlayer(target)
         
         local character = LocalPlayer.Character
         if not character then break end
+        
+        -- 持續維持穿牆狀態 (防止遊戲引擎自動恢復碰撞)
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                pcall(function()
+                    part.CanCollide = false
+                end)
+            end
+        end
         
         local hrp = character:FindFirstChild("HumanoidRootPart")
         local targetChar = target.Character
@@ -2091,7 +2189,7 @@ local function StopInstantTeleport()
     end
 end
 
--- ==================== 單次傳送功能（不受飛行干擾）====================
+-- ==================== 單次傳送功能（與追蹤傳送共用 XYZ 軸）====================
 
 -- 執行單次傳送
 local function PerformSingleTeleport(player)
@@ -2124,7 +2222,7 @@ local function PerformSingleTeleport(player)
         return false
     end
     
-    -- 計算目標位置加上XYZ偏離
+    -- 計算目標位置加上XYZ偏離（使用 TrackConfig 的設定，與追蹤傳送共用）
     local targetPos = targetRoot.Position
     local offsetPos = Vector3.new(
         targetPos.X + TrackConfig.OffsetX,
@@ -2151,6 +2249,86 @@ local function PerformSingleTeleport(player)
     return true
 end
 
+-- 停止循環傳送
+local function StopCycleTeleport()
+    CycleConfig.Enabled = false
+    if CycleConfig.CycleThread then
+        task.cancel(CycleConfig.CycleThread)
+        CycleConfig.CycleThread = nil
+    end
+    
+    if cycleButton then
+        cycleButton:SetTitle("開啟循環傳送")
+    end
+    
+    -- 關閉穿牆（恢復碰撞）
+    DisableNoClip()
+    
+    WindUI:Notify({ Title = "循環傳送", Content = "已停止循環傳送", Duration = 2 })
+end
+
+-- 開始循環傳送（只能設定 Y 軸，X 軸和 Z 軸固定為 0）
+local function StartCycleTeleport(player)
+    if not player then return end
+    
+    -- 停止其他傳送功能
+    if TrackConfig.Enabled then StopTrackPlayer() end
+    if InstantConfig.Enabled then StopInstantTeleport() end
+    
+    CycleConfig.Target = player
+    CycleConfig.Enabled = true
+    
+    if cycleButton then
+        cycleButton:SetTitle("停止循環傳送")
+    end
+    
+    -- 開啟穿牆
+    EnableNoClip()
+    
+    CycleConfig.CycleThread = task.spawn(function()
+        while CycleConfig.Enabled do
+            local success, err = pcall(function()
+                local char = LocalPlayer.Character
+                local targetChar = player.Character
+                
+                if char and targetChar and char:FindFirstChild("HumanoidRootPart") and targetChar:FindFirstChild("HumanoidRootPart") then
+                    local hrp = char.HumanoidRootPart
+                    local targetHrp = targetChar.HumanoidRootPart
+                    
+                    -- 核心優化：防止被踢的關鍵是重置速度
+                    local function SafeTeleport(cf)
+                        hrp.Velocity = Vector3.new(0, 0, 0)
+                        char:PivotTo(cf)
+                    end
+
+                    -- 1. 傳送到偏離位置（只能設定 Y 軸，X 軸和 Z 軸固定為 0）
+                    local offsetCFrame = targetHrp.CFrame * CFrame.new(0, CycleConfig.OffsetY, 0)  -- X和Z固定為0
+                    SafeTeleport(offsetCFrame)
+                    task.wait(CycleConfig.Interval)
+                    
+                    if not CycleConfig.Enabled then return end
+                    
+                    -- 2. 傳送到玩家身上
+                    SafeTeleport(targetHrp.CFrame)
+                    task.wait(CycleConfig.Interval)
+                else
+                    StopCycleTeleport()
+                end
+            end)
+            
+            if not success then
+                task.wait(0.5)
+            end
+        end
+    end)
+    
+    WindUI:Notify({ 
+        Title = "循環傳送", 
+        Content = "正在對 " .. player.Name .. " 進行循環傳送 (Y軸偏離: " .. CycleConfig.OffsetY .. ")", 
+        Duration = 2 
+    })
+end
+
 -- 停止所有功能
 local function StopAllFunctions()
     if TrackConfig.Enabled then
@@ -2158,6 +2336,9 @@ local function StopAllFunctions()
     end
     if InstantConfig.Enabled then
         StopInstantTeleport()
+    end
+    if CycleConfig.Enabled then
+        StopCycleTeleport()
     end
 end
 
@@ -2244,7 +2425,8 @@ local sea3Locations = {
     ["海洋城堡"] = CFrame.new(-12463.60, 376.26, -7566.08),
     ["海龜豪宅"] = CFrame.new(-5060.41, 316.43, -3192.30),
     ["司法"] = CFrame.new(-5096.48, 316.43, -3177.91),
-    ["九頭蛇"] = CFrame.new(-5027.03, 316.43, -3206.07)
+    ["九頭蛇"] = CFrame.new(-5027.03, 316.43, -3206.07),
+    ["時間神殿"] = CFrame.new(28286, 14897, 103)  -- 新增的時間神殿傳送點
 }
 
 local TeleportLocations = {
@@ -2259,6 +2441,7 @@ local TeleportLocations = {
     ["海龜豪宅"] = { CFrame = sea3Locations["海龜豪宅"], type = "cframe" },
     ["司法"] = { CFrame = sea3Locations["司法"], type = "cframe" },
     ["九頭蛇"] = { CFrame = sea3Locations["九頭蛇"], type = "cframe" },
+    ["時間神殿"] = { CFrame = sea3Locations["時間神殿"], type = "cframe" },  -- 新增的時間神殿
     ["自定義"] = { CFrame = CFrame.new(0, 0, 0), type = "custom" },
 }
 
@@ -2471,6 +2654,28 @@ local function StartTargetCheckLoop()
                     selectedPlayer = nil
                 end
             end
+            
+            if CycleConfig.Enabled and CycleConfig.Target then
+                local targetStillExists = false
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player == CycleConfig.Target then
+                        targetStillExists = true
+                        break
+                    end
+                end
+                
+                if not targetStillExists then
+                    WindUI:Notify({ 
+                        Title = "目標離開", 
+                        Content = "循環傳送目標已離開遊戲，自動關閉傳送", 
+                        Duration = 3,
+                        Icon = "info"
+                    })
+                    StopCycleTeleport()
+                    -- 清除選擇的玩家
+                    selectedPlayer = nil
+                end
+            end
         end
     end)
 end
@@ -2479,22 +2684,20 @@ end
 LocalPlayer.CharacterAdded:Connect(function(newCharacter)
     task.wait(1)
     
+    -- 重置快取，避免引用舊角色的部件
     originalCollisionStates = {}
     
-    pcall(function()
-        for _, part in ipairs(newCharacter:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = true
-            end
-        end
-    end)
-    
+    -- 檢查是否有功能需要重新啟動
     if TrackConfig.Enabled and TrackConfig.Target then
         StartTrackPlayer(TrackConfig.Target)
     end
     
     if InstantConfig.Enabled and InstantConfig.Target then
         StartInstantTeleport(InstantConfig.Target)
+    end
+    
+    if CycleConfig.Enabled and CycleConfig.Target then
+        StartCycleTeleport(CycleConfig.Target)
     end
 end)
 
@@ -2559,11 +2762,16 @@ if Tabs and Tabs.TeleportTab then
     -- ==================== 追蹤傳送區域 ====================
     
     Tabs.TeleportTab:Divider()
+    Tabs.TeleportTab:Paragraph({
+        Title = "追蹤傳送設定",
+        Desc = "以下設定用於追蹤傳送、直接傳送和單次傳送",
+        Image = "settings",
+    })
 
     -- 速度設定
     local speedInput = Tabs.TeleportTab:Input({
         Title = "追蹤速度",
-        Value = tostring(TrackConfig.Speed),
+        Value = tostring(TrackConfig.Speed),  -- 預設顯示 360
         Placeholder = "輸入速度值",
         Callback = function(value)
             SetTrackSpeed(value)
@@ -2593,7 +2801,7 @@ if Tabs and Tabs.TeleportTab then
     -- Z軸偏離設定
     local offsetZInput = Tabs.TeleportTab:Input({
         Title = "Z軸偏離",
-        Value = tostring(TrackConfig.OffsetZ),
+        Value = tostring(TrackConfig.OffsetZ),  -- 預設顯示 0
         Placeholder = "輸入Z軸偏離值",
         Callback = function(value)
             SetOffsetZ(value)
@@ -2666,9 +2874,9 @@ if Tabs and Tabs.TeleportTab then
         end
     })
 
-    -- 單次傳送按鈕
+    -- 單次傳送按鈕（移到直接傳送下面）
     singleButton = Tabs.TeleportTab:Button({
-        Title = "單次傳送",
+        Title = "單次傳送 (使用追蹤設定)",
         Callback = function()
             if not selectedPlayer then
                 WindUI:Notify({ 
@@ -2689,10 +2897,70 @@ if Tabs and Tabs.TeleportTab then
         end
     })
 
+    -- ==================== 循環傳送區域（只能設定 Y 軸）====================
+    
     Tabs.TeleportTab:Divider()
+    Tabs.TeleportTab:Paragraph({
+        Title = "循環傳送設定",
+        Desc = "循環傳送只能設定 Y 軸偏離，X 軸和 Z 軸固定為 0",
+        Image = "repeat",
+    })
+
+    -- 循環傳送 Y 軸偏離設定（只能設定 Y 軸）
+    Tabs.TeleportTab:Input({
+        Title = "循環 Y 軸偏離",
+        Value = tostring(CycleConfig.OffsetY),
+        Placeholder = "輸入 Y 軸偏離值",
+        Callback = function(value)
+            SetCycleOffsetY(value)
+        end
+    })
+
+    -- 循環間隔設定
+    Tabs.TeleportTab:Input({
+        Title = "循環切換間隔 (秒)",
+        Value = tostring(CycleConfig.Interval),
+        Placeholder = "輸入秒數 (例: 0.1)",
+        Callback = function(value)
+            SetCycleInterval(value)
+        end
+    })
+
+    -- 循環傳送按鈕
+    cycleButton = Tabs.TeleportTab:Button({
+        Title = "開啟循環傳送",
+        Callback = function()
+            if CycleConfig.Enabled then
+                StopCycleTeleport()
+            else
+                if not selectedPlayer then
+                    WindUI:Notify({ 
+                        Title = "循環傳送", 
+                        Content = "請先選擇目標玩家", 
+                        Duration = 3,
+                        Icon = "alert-triangle"
+                    })
+                    return
+                end
+                
+                -- 檢查目標玩家是否還存在
+                if not CheckTargetPlayer() then
+                    return
+                end
+                
+                -- 停止其他傳送功能
+                if TrackConfig.Enabled then StopTrackPlayer() end
+                if InstantConfig.Enabled then StopInstantTeleport() end
+                
+                StartCycleTeleport(selectedPlayer)
+            end
+        end
+    })
 
     -- ===================== 原有的傳送功能 =====================
     
+    Tabs.TeleportTab:Divider()
+
     Tabs.TeleportTab:Button({
         Title = "傳送至一海",
         Callback = function()
@@ -2753,7 +3021,7 @@ if Tabs and Tabs.TeleportTab then
         })
     end
 
-    -- ===================== 血量自動偵測傳送系統（智能觸發版 - 無限傳送 - 無冷卻）=====================
+    -- ===================== 血量自動偵測傳送系統 =====================
     Tabs.TeleportTab:Divider()
 
     Tabs.TeleportTab:Toggle({
@@ -3084,9 +3352,8 @@ local function StopSimpleBringMob()
     })
 end
 
--- ===================== 聚怪功能註記（新增） =====================
+-- ===================== 免控旋轉功能 =====================
 
--- 免控旋轉功能
 local ROTATION_CONFIG = {
     Enabled = false,
     RotationSpeed = 2000,
@@ -3271,7 +3538,7 @@ Tabs.ActivityTab:Input({
     end
 })
 
--- 單一開關按鍵（包含Boss和小怪，固定前方2單位）- 修改標題和通知
+-- 單一開關按鍵（包含Boss和小怪，固定前方2單位）
 Tabs.ActivityTab:Toggle({
     Title = "⚡ 一鍵聚怪 ⚠️(可能只有視覺效果)",
     Value = false,
@@ -3292,6 +3559,25 @@ Tabs.ActivityTab:Toggle({
 })
 
 Tabs.ActivityTab:Divider()
+
+-- ===================== 免控旋轉功能（移到聚怪下面）=====================
+
+Tabs.ActivityTab:Toggle({
+    Title = "免控旋轉",
+    Value = false,
+    Callback = function(state)
+        ROTATION_CONFIG.Enabled = state
+        if state then
+            startRotation()
+        else
+            stopRotation()
+        end
+    end
+})
+
+Tabs.ActivityTab:Divider()
+
+-- ===================== 其他按鈕功能 =====================
 
 Tabs.ActivityTab:Button({
     Title = "pvp",
@@ -3360,22 +3646,6 @@ Tabs.ActivityTab:Button({
         pcall(function()
             loadstring(game:HttpGet("https://raw.githubusercontent.com/56123asda/546546/refs/heads/main/aimbot"))()
         end)
-    end
-})
-
--- 免控旋轉功能
-Tabs.ActivityTab:Divider()
-
-Tabs.ActivityTab:Toggle({
-    Title = "免控旋轉",
-    Value = false,
-    Callback = function(state)
-        ROTATION_CONFIG.Enabled = state
-        if state then
-            startRotation()
-        else
-            stopRotation()
-        end
     end
 })
 
@@ -3615,6 +3885,12 @@ print("免控旋轉功能已添加！")
 print("跳躍高度修改功能已添加（範圍10-1000）！")
 print("血量自動偵測傳送功能已添加（智能觸發 + 無限傳送 + 無冷卻）！")
 print("追蹤傳送 + 直接傳送 + 單次傳送三合一系統已整合！")
+print("✅ 追蹤速度預設為 360！")
+print("✅ Z 軸偏離預設為 0！")
+print("✅ 單次傳送現在與追蹤傳送共用 XYZ 軸設定！")
+print("✅ 單次傳送已移到直接傳送下面！")
+print("✅ 免控旋轉已移到聚怪功能下面！")
+print("循環傳送已獨立設定，只能設定 Y 軸，X 軸和 Z 軸固定為 0！")
 print("追蹤傳送新增速度調整功能！")
 print("追蹤傳送完全不受飛行影響！")
 print("追蹤傳送開啟時自動穿牆，關閉時完全恢復碰撞！")
@@ -3629,3 +3905,4 @@ print("水上行走功能已整合！")
 print("聚怪功能已整合（可設定範圍，固定前方2單位）！")
 print("✅ FOV 視角範圍功能已新增！")
 print("✅ 聚怪功能已添加視覺效果註記！")
+print("✅ 時間神殿傳送點已新增 (28286, 14897, 103)！")
