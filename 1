@@ -146,6 +146,7 @@ Tabs.AttackTab = functionSection:Tab({ Title = "範圍攻擊", Icon = "sword" })
 Tabs.ESPTab = functionSection:Tab({ Title = "透視", Icon = "eye" })
 Tabs.TeleportTab = functionSection:Tab({ Title = "傳送", Icon = "map-pin" })
 Tabs.ActivityTab = functionSection:Tab({ Title = "功能2", Icon = "info" })
+Tabs.InstantKillTab = functionSection:Tab({ Title = "秒殺功能", Icon = "zap" })
 Tabs.texiaoTab = configSection:Tab({ Title = "更改特效", Icon = "palette" })
 Tabs.ThemeTab = configSection:Tab({ Title = "主題顏色", Icon = "palette" })
 
@@ -843,7 +844,7 @@ Tabs.GeneralTab:Button({
     end
 })
 
--- ===================== 範圍攻擊系統 ===================== 
+-- ===================== 範圍攻擊系統 =====================
  
  local VirtualInputManager = game:GetService("VirtualInputManager") 
  local Modules = ReplicatedStorage:WaitForChild("Modules") 
@@ -2717,7 +2718,7 @@ if Tabs and Tabs.TeleportTab then
 
     -- 刷新按鈕（唯一的手動刷新方式）
     refreshButton = Tabs.TeleportTab:Button({
-        Title = "🔄 重新載入玩家列表",
+        Title = "重新載入玩家列表",
         Callback = RefreshPlayerList
     })
 
@@ -3025,7 +3026,7 @@ if Tabs and Tabs.TeleportTab then
     Tabs.TeleportTab:Divider()
 
     Tabs.TeleportTab:Toggle({
-        Title = "血量自動偵測傳送（智能觸發）",
+        Title = "血量自動偵測傳送",
         Value = false,
         Callback = function(state)
             HealthDetectConfig.Enabled = state
@@ -3033,7 +3034,7 @@ if Tabs and Tabs.TeleportTab then
                 resetAllHealthStates()  -- 重置所有狀態
                 startHealthDetection()
                 WindUI:Notify({
-                    Title = "血量偵測（智能模式）",
+                    Title = "血量偵測",
                     Content = "已開啟 - 低血量 → 恢復 → 再次低血量才會觸發（無冷卻）",
                     Duration = 4
                 })
@@ -3649,7 +3650,416 @@ Tabs.ActivityTab:Button({
     end
 })
 
--- 特效顏色更換 
+-- =====================================================
+-- 秒殺功能配置（虛空閃避）- 固定參數
+-- =====================================================
+local InstantKillConfig = {
+    Enabled = false,           -- 總開關
+    VoidTime = 0.55,           -- 虛空停留時間（固定）
+    TeleportY = -200000,       -- 傳送Y軸位置（固定）
+    ShowNotifications = true,  -- 顯示通知
+}
+
+-- =====================================================
+-- 自瞄功能配置 - 固定參數（鎖定身體）
+-- =====================================================
+local AimbotConfig = {
+    Enabled = false,            -- 自瞄開關
+    Smoothness = 0.25,          -- 平滑度（固定）
+    TargetPart = "HumanoidRootPart",  -- 鎖定身體（固定）
+}
+
+-- =====================================================
+-- 秒殺功能變量
+-- =====================================================
+local voidCharacter
+local voidRoot
+local VoidState = {
+    IsTeleporting = false
+}
+local trackedSounds = {}
+local killConnection = nil
+
+-- =====================================================
+-- 自瞄功能變量
+-- =====================================================
+local aimbotPlayerList = {}
+local aimbotPlayerMap = {}
+local selectedAimbotTarget = nil
+local aimbotStatusParagraph = nil
+local aimbotPlayerDropdown = nil
+local aimbotButton = nil
+local aimbotConnection = nil
+
+-- =====================================================
+-- 秒殺功能核心函數
+-- =====================================================
+
+local function SetupVoidCharacter(char)
+    voidCharacter = char
+    voidRoot = char:WaitForChild("HumanoidRootPart")
+end
+
+if LocalPlayer.Character then
+    SetupVoidCharacter(LocalPlayer.Character)
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    SetupVoidCharacter(char)
+end)
+
+local function TPVoid(preSavedCFrame)
+    if VoidState.IsTeleporting or not InstantKillConfig.Enabled then 
+        return 
+    end
+    if not voidRoot or not voidCharacter then 
+        return 
+    end
+
+    local humanoid = voidCharacter:FindFirstChild("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then 
+        return 
+    end
+    
+    -- 檢查並停止其他傳送功能
+    if TrackConfig and TrackConfig.Enabled then
+        StopTrackPlayer()
+    end
+    if InstantConfig and InstantConfig.Enabled then
+        StopInstantTeleport()
+    end
+    if CycleConfig and CycleConfig.Enabled then
+        StopCycleTeleport()
+    end
+
+    VoidState.IsTeleporting = true
+
+    -- 顯示通知
+    WindUI:Notify({
+        Title = "秒殺觸發",
+        Content = "閃避攻擊並傳送至虛空",
+        Duration = 1,
+        Icon = "zap"
+    })
+
+    -- 水平傳送到虛空
+    local heartbeatConn
+    heartbeatConn = RunService.Heartbeat:Connect(function()
+        if voidRoot then
+            local pos = voidRoot.Position
+            voidRoot.CFrame = CFrame.new(pos.X, InstantKillConfig.TeleportY, pos.Z)
+            voidRoot.AssemblyLinearVelocity = Vector3.zero
+        end
+    end)
+
+    task.wait(InstantKillConfig.VoidTime)
+
+    if heartbeatConn then
+        heartbeatConn:Disconnect()
+    end
+    
+    -- 傳送回原來位置
+    if voidRoot and humanoid.Health > 0 then
+        voidRoot.CFrame = preSavedCFrame + Vector3.new(0, 0.5, 0)
+        voidRoot.AssemblyLinearVelocity = Vector3.zero
+        voidRoot.AssemblyAngularVelocity = Vector3.zero
+    end
+
+    task.wait(0.1)
+    VoidState.IsTeleporting = false
+end
+
+local function StartInstantKill()
+    if killConnection then
+        killConnection:Disconnect()
+        killConnection = nil
+    end
+    
+    trackedSounds = {}
+    
+    local soundsFolder = workspace:FindFirstChild("_WorldOrigin")
+    if not soundsFolder then
+        soundsFolder = Instance.new("Folder")
+        soundsFolder.Name = "_WorldOrigin"
+        soundsFolder.Parent = workspace
+    end
+    
+    local sounds = soundsFolder:FindFirstChild("Sounds")
+    if not sounds then
+        sounds = Instance.new("Folder")
+        sounds.Name = "Sounds"
+        sounds.Parent = soundsFolder
+    end
+    
+    killConnection = RunService.RenderStepped:Connect(function()
+        if not InstantKillConfig.Enabled then return end
+        if not voidRoot then return end
+        
+        for _, obj in ipairs(sounds:GetDescendants()) do
+            if obj:IsA("Sound") and not trackedSounds[obj] then
+                if obj.Name == "SaddiHit" or 
+                   obj.Name == "DoughDrip" or 
+                   obj.Name == "Buddha2pickup" or
+                   obj.Name == "Hit" or
+                   obj.Name == "SlashHit" then
+                    
+                    trackedSounds[obj] = true
+                    TPVoid(voidRoot.CFrame)
+                end
+            end
+        end
+        
+        for soundObj in pairs(trackedSounds) do
+            if not soundObj:IsDescendantOf(sounds) then
+                trackedSounds[soundObj] = nil
+            end
+        end
+    end)
+    
+    WindUI:Notify({
+        Title = "秒殺功能",
+        Content = "已開啟 - 自動閃避攻擊",
+        Duration = 3,
+        Icon = "zap"
+    })
+end
+
+local function StopInstantKill()
+    if killConnection then
+        killConnection:Disconnect()
+        killConnection = nil
+    end
+    trackedSounds = {}
+    VoidState.IsTeleporting = false
+    
+    WindUI:Notify({
+        Title = "秒殺功能",
+        Content = "已關閉",
+        Duration = 2
+    })
+end
+
+-- =====================================================
+-- 自瞄功能核心函數（鎖定身體 HumanoidRootPart）
+-- =====================================================
+
+local function RefreshAimbotPlayers()
+    aimbotPlayerList = {}
+    aimbotPlayerMap = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            table.insert(aimbotPlayerList, p.Name)
+            aimbotPlayerMap[p.Name] = p
+        end
+    end
+    
+    if aimbotPlayerDropdown then
+        local displayList = #aimbotPlayerList > 0 and aimbotPlayerList or {"暫無其他玩家"}
+        aimbotPlayerDropdown:Refresh(displayList)
+    end
+end
+
+-- 檢查目標是否存活
+local function IsTargetAlive(player)
+    if player and player.Character and player.Character:FindFirstChild(AimbotConfig.TargetPart) then
+        local hum = player.Character:FindFirstChildOfClass("Humanoid")
+        return hum and hum.Health > 0
+    end
+    return false
+end
+
+-- 啟動自瞄
+local function StartAimbot()
+    if aimbotConnection then
+        aimbotConnection:Disconnect()
+        aimbotConnection = nil
+    end
+    
+    aimbotConnection = RunService.RenderStepped:Connect(function()
+        if AimbotConfig.Enabled and selectedAimbotTarget then
+            if IsTargetAlive(selectedAimbotTarget) then
+                local targetObj = selectedAimbotTarget.Character[AimbotConfig.TargetPart]
+                if targetObj then
+                    local targetPos = CFrame.new(Camera.CFrame.Position, targetObj.Position)
+                    -- 平滑插值移動相機
+                    Camera.CFrame = Camera.CFrame:Lerp(targetPos, AimbotConfig.Smoothness)
+                end
+            end
+        end
+    end)
+    
+    WindUI:Notify({
+        Title = "自瞄功能",
+        Content = "已啟動 - 鎖定 " .. (selectedAimbotTarget and selectedAimbotTarget.Name or "目標") .. " 的身體",
+        Duration = 2
+    })
+end
+
+-- 停止自瞄
+local function StopAimbot()
+    if aimbotConnection then
+        aimbotConnection:Disconnect()
+        aimbotConnection = nil
+    end
+    
+    WindUI:Notify({
+        Title = "自瞄功能",
+        Content = "已關閉",
+        Duration = 2
+    })
+end
+
+-- =====================================================
+-- 秒殺功能頁 UI - 秒殺設定
+-- =====================================================
+
+-- 秒殺開關按鈕
+local killButton = nil
+killButton = Tabs.InstantKillTab:Button({
+    Title = "秒殺功能 [關閉]",
+    Callback = function()
+        if not InstantKillConfig.Enabled then
+            InstantKillConfig.Enabled = true
+            StartInstantKill()
+            killButton:SetTitle("秒殺功能 [開啟]")
+            WindUI:Notify({
+                Title = "秒殺功能",
+                Content = "已開啟 - 自動閃避攻擊",
+                Duration = 2,
+                Icon = "zap"
+            })
+        else
+            InstantKillConfig.Enabled = false
+            StopInstantKill()
+            killButton:SetTitle("秒殺功能 [關閉]")
+            WindUI:Notify({
+                Title = "秒殺功能",
+                Content = "已關閉",
+                Duration = 2
+            })
+        end
+    end
+})
+
+Tabs.InstantKillTab:Divider()
+
+-- =====================================================
+-- 秒殺功能頁 UI - 自瞄設定（鎖定身體）
+-- =====================================================
+
+Tabs.InstantKillTab:Paragraph({
+    Title = "自瞄功能設定",
+    Desc = "自動鎖定玩家身體部位\n點擊按鈕開啟/關閉自瞄",
+    Image = "target",
+})
+
+-- 刷新玩家列表按鈕
+Tabs.InstantKillTab:Button({
+    Title = "刷新玩家列表",
+    Callback = function()
+        RefreshAimbotPlayers()
+        WindUI:Notify({ 
+            Title = "自瞄系統", 
+            Content = "玩家列表已更新，找到 " .. #aimbotPlayerList .. " 位玩家", 
+            Duration = 2 
+        })
+    end
+})
+
+-- 自瞄玩家選擇下拉選單
+aimbotPlayerDropdown = Tabs.InstantKillTab:Dropdown({
+    Title = "選擇目標玩家",
+    Values = aimbotPlayerList,
+    Value = "請選擇玩家",
+    Callback = function(selected)
+        if selected ~= "請選擇玩家" and selected ~= "暫無其他玩家" then
+            selectedAimbotTarget = aimbotPlayerMap[selected]
+            if aimbotStatusParagraph then
+                aimbotStatusParagraph:SetDesc("當前鎖定: " .. selectedAimbotTarget.Name)
+            end
+            WindUI:Notify({
+                Title = "自瞄目標",
+                Content = "已選擇: " .. selectedAimbotTarget.Name,
+                Duration = 2
+            })
+            
+            -- 如果自瞄已開啟，重新啟動以鎖定新目標
+            if AimbotConfig.Enabled then
+                StopAimbot()
+                task.wait(0.1)
+                StartAimbot()
+                if aimbotButton then
+                    aimbotButton:SetTitle("自瞄功能 [開啟]")
+                end
+            end
+        end
+    end
+})
+
+-- 自瞄開關按鈕
+aimbotButton = Tabs.InstantKillTab:Button({
+    Title = "自瞄功能 [關閉]",
+    Callback = function()
+        if not AimbotConfig.Enabled then
+            -- 嘗試開啟
+            if not selectedAimbotTarget then
+                WindUI:Notify({
+                    Title = "提示",
+                    Content = "請先選擇目標玩家",
+                    Duration = 3,
+                    Icon = "alert-triangle"
+                })
+                return
+            end
+            AimbotConfig.Enabled = true
+            StartAimbot()
+            aimbotButton:SetTitle("自瞄功能 [開啟]")
+            WindUI:Notify({
+                Title = "自瞄功能",
+                Content = "已開啟 - 鎖定 " .. selectedAimbotTarget.Name .. " 的身體",
+                Duration = 2
+            })
+        else
+            -- 關閉
+            AimbotConfig.Enabled = false
+            StopAimbot()
+            aimbotButton:SetTitle("自瞄功能 [關閉]")
+            WindUI:Notify({
+                Title = "自瞄功能",
+                Content = "已關閉",
+                Duration = 2
+            })
+        end
+    end
+})
+
+-- 自瞄狀態顯示
+aimbotStatusParagraph = Tabs.InstantKillTab:Paragraph({
+    Title = "自瞄狀態",
+    Desc = "當前鎖定: 尚未選擇",
+    Image = "info"
+})
+
+Tabs.InstantKillTab:Divider()
+
+
+-- =====================================================
+-- 初始化自瞄玩家列表
+-- =====================================================
+RefreshAimbotPlayers()
+
+-- 玩家加入/離開時更新自瞄列表
+Players.PlayerAdded:Connect(function()
+    task.wait(1)
+    RefreshAimbotPlayers()
+end)
+
+Players.PlayerRemoving:Connect(function()
+    task.wait(1)
+    RefreshAimbotPlayers()
+end)
+
+-- ===================== 特效顏色更換 =====================
 Tabs.texiaoTab:Paragraph({
     Title = "特效更換",
     Desc = "只有你自己能看到",
@@ -3851,6 +4261,26 @@ local function updateChatCommands()
                 waterWalkLoop = nil
             end
             WindUI:Notify({ Title = "水上行走", Content = "已關閉", Duration = 2 })
+        elseif msg == "/instantkill on" then
+            InstantKillConfig.Enabled = true
+            StartInstantKill()
+            WindUI:Notify({ Title = "秒殺功能", Content = "已開啟", Duration = 2 })
+        elseif msg == "/instantkill off" then
+            InstantKillConfig.Enabled = false
+            StopInstantKill()
+            WindUI:Notify({ Title = "秒殺功能", Content = "已關閉", Duration = 2 })
+        elseif msg == "/aimbot on" then
+            if not selectedAimbotTarget then
+                WindUI:Notify({ Title = "提示", Content = "請先選擇自瞄目標", Duration = 2 })
+                return
+            end
+            AimbotConfig.Enabled = true
+            StartAimbot()
+            WindUI:Notify({ Title = "自瞄功能", Content = "已開啟", Duration = 2 })
+        elseif msg == "/aimbot off" then
+            AimbotConfig.Enabled = false
+            StopAimbot()
+            WindUI:Notify({ Title = "自瞄功能", Content = "已關閉", Duration = 2 })
         end
     end)
 end
@@ -3859,50 +4289,36 @@ updateChatCommands()
 
 local function createCommands()
     print("\n可用命令:")
-    print("/attack on - 開啟快速攻擊")
-    print("/attack off - 關閉快速攻擊")
-    print("/attack status - 查看狀態")
-    print("/esp on - 開啟ESP")
-    print("/esp off - 關閉ESP")
-    print("/rotation on - 開啟免控旋轉")
-    print("/rotation off - 關閉免控旋轉")
-    print("/jump on - 開啟跳躍修改")
-    print("/jump off - 關閉跳躍修改")
-    print("/hp on - 開啟血量偵測傳送")
-    print("/hp off - 關閉血量偵測傳送")
-    print("/bring on - 開啟聚怪功能 (可能只有視覺效果)")
-    print("/bring off - 關閉聚怪功能")
-    print("/water on - 開啟水上行走")
-    print("/water off - 關閉水上行走")
+    print("/attack on/off - 快速攻擊開關")
+    print("/attack status - 查看攻擊狀態")
+    print("/esp on/off - ESP開關")
+    print("/rotation on/off - 免控旋轉開關")
+    print("/jump on/off - 跳躍修改開關")
+    print("/hp on/off - 血量偵測傳送開關")
+    print("/bring on/off - 聚怪功能開關")
+    print("/water on/off - 水上行走開關")
+    print("/instantkill on/off - 秒殺功能開關")
+    print("/aimbot on/off - 自瞄功能開關")
     print("========================================")
 end
 
 createCommands()
 
 print("小傑腳本已完全加載完成！")
-print("新快速攻擊系統已整合完成！")
-print("免控旋轉功能已添加！")
-print("跳躍高度修改功能已添加（範圍10-1000）！")
-print("血量自動偵測傳送功能已添加（智能觸發 + 無限傳送 + 無冷卻）！")
-print("追蹤傳送 + 直接傳送 + 單次傳送三合一系統已整合！")
-print("✅ 追蹤速度預設為 360！")
-print("✅ Z 軸偏離預設為 0！")
-print("✅ 單次傳送現在與追蹤傳送共用 XYZ 軸設定！")
-print("✅ 單次傳送已移到直接傳送下面！")
-print("✅ 免控旋轉已移到聚怪功能下面！")
-print("循環傳送已獨立設定，只能設定 Y 軸，X 軸和 Z 軸固定為 0！")
-print("追蹤傳送新增速度調整功能！")
-print("追蹤傳送完全不受飛行影響！")
-print("追蹤傳送開啟時自動穿牆，關閉時完全恢復碰撞！")
-print("玩家列表重新載入功能已完成！使用 Refresh 方法！")
-print("目標玩家不存在時會自動提示！")
-print("目標離開時自動關閉傳送！")
-print("已移除自動刷新功能，改為純手動刷新！")
-print("界面已簡化，移除所有特殊顏色標題")
-print("移除岩漿已改為移除岩漿and鬼船傷害")
-print("手機跳躍功能已整合！")
-print("水上行走功能已整合！")
-print("聚怪功能已整合（可設定範圍，固定前方2單位）！")
+print("✅ 秒殺功能（虛空閃避）已整合！")
+print("✅ 自瞄功能（自動鎖定）已整合！")
+print("✅ 快速攻擊系統已整合！")
+print("✅ 免控旋轉功能已添加！")
+print("✅ 跳躍高度修改功能已添加（範圍10-1000）！")
+print("✅ 血量自動偵測傳送功能已添加（智能觸發 + 無限傳送 + 無冷卻）！")
+print("✅ 追蹤傳送 + 直接傳送 + 單次傳送三合一系統已整合！")
+print("✅ 循環傳送已獨立設定，只能設定 Y 軸！")
+print("✅ 追蹤傳送新增速度調整功能！")
+print("✅ 追蹤傳送完全不受飛行影響！")
+print("✅ 追蹤傳送開啟時自動穿牆，關閉時完全恢復碰撞！")
+print("✅ 玩家列表重新載入功能已完成！")
+print("✅ 手機跳躍功能已整合！")
+print("✅ 水上行走功能已整合！")
+print("✅ 聚怪功能已整合！")
 print("✅ FOV 視角範圍功能已新增！")
-print("✅ 聚怪功能已添加視覺效果註記！")
-print("✅ 時間神殿傳送點已新增 (28286, 14897, 103)！")
+print("✅ 時間神殿傳送點已新增！")
